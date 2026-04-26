@@ -2,12 +2,19 @@ import { useState } from 'react'
 import useStore from '../../store/useStore.js'
 import { useToast } from '../../context/ToastContext.jsx'
 
-const ALERT_METRICS = [
-  { value: 'risk_high', label: 'High-risk commit pushed' },
-  { value: 'pr_open_days', label: 'PR open > N days' },
-  { value: 'stale_branch', label: 'Branch stale > N days' },
-  { value: 'no_commit_days', label: 'No commits for N days' },
+const RULE_TYPES = [
+  { value: 'new_commit',    label: 'Any new commit' },
+  { value: 'new_pr',        label: 'Any new PR opened' },
+  { value: 'pr_merged',     label: 'Any PR merged' },
+  { value: 'pr_stale',      label: 'PR stale for N days' },
+  { value: 'author_commit', label: 'New commit by author' },
+  { value: 'author_pr',     label: 'New PR by author' },
 ]
+const RULE_HINTS = {
+  pr_stale:     'Enter number of days (e.g. 7)',
+  author_commit: 'Enter GitHub username',
+  author_pr:     'Enter GitHub username',
+}
 
 export default function SettingsView() {
   const {
@@ -17,27 +24,20 @@ export default function SettingsView() {
     commitAnalysisCache, prAnalysisCache, commitDetailCache,
     prFilesCache, prReviewsCache, prCommentsCache,
     prReviewCommentsCache, prReviewAICache, prRiskCache,
-    clearAllCaches,
+    clearAllCaches, disconnect, backToRepos,
   } = useStore()
   const toast = useToast()
 
   const [keyInput, setKeyInput]   = useState('')
   const [keySaved, setKeySaved]   = useState(!!sessionStorage.getItem('gd_anth_key'))
-  const [newRuleMetric, setNewRuleMetric] = useState(ALERT_METRICS[0].value)
-  const [newRuleThreshold, setNewRuleThreshold] = useState(3)
-  const [notifStatus, setNotifStatus] = useState('')
+  const [newType, setNewType]     = useState('new_commit')
+  const [newParam, setNewParam]   = useState('')
 
-  const cacheStats = [
-    { label: 'Commit analyses', count: commitAnalysisCache.size },
-    { label: 'PR analyses',     count: prAnalysisCache.size },
-    { label: 'Commit details',  count: commitDetailCache.size },
-    { label: 'PR files',        count: prFilesCache.size },
-    { label: 'PR reviews',      count: prReviewsCache.size },
-    { label: 'PR comments',     count: prCommentsCache.size + prReviewCommentsCache.size },
-    { label: 'AI reviews',      count: prReviewAICache.size },
-    { label: 'Risk scores',     count: prRiskCache.size },
-  ]
-  const totalCached = cacheStats.reduce((s, c) => s + c.count, 0)
+  const cacheTotal = commitAnalysisCache.size + prAnalysisCache.size + commitDetailCache.size +
+    prFilesCache.size + prReviewsCache.size + prCommentsCache.size +
+    prReviewCommentsCache.size + prReviewAICache.size + prRiskCache.size
+
+  const notifPerm = 'Notification' in window ? Notification.permission : 'unsupported'
 
   function saveKey() {
     const k = keyInput.trim()
@@ -51,212 +51,187 @@ export default function SettingsView() {
   function removeKey() {
     sessionStorage.removeItem('gd_anth_key')
     setKeySaved(false)
-    toast('🗑️', 'API key removed', 'You can add it again anytime')
-  }
-
-  function togglePref(key) {
-    setSettings({ ...settings, [key]: !settings[key] })
+    toast('🗑️', 'API key removed', '')
   }
 
   function addRule() {
-    const rule = { id: Date.now(), metric: newRuleMetric, threshold: Number(newRuleThreshold), enabled: true }
+    const needsParam = ['pr_stale', 'author_commit', 'author_pr'].includes(newType)
+    if (needsParam && !newParam.trim()) {
+      toast('⚠️', 'Missing value', RULE_HINTS[newType])
+      return
+    }
+    const rule = { id: Date.now(), type: newType, param: newParam.trim(), enabled: true }
     setAlertRules([...alertRules, rule])
-    toast('✅', 'Alert rule added', ALERT_METRICS.find(m => m.value === newRuleMetric)?.label)
+    setNewParam('')
+    toast('✅', 'Alert rule added', RULE_TYPES.find(r => r.value === newType)?.label)
   }
 
-  function removeRule(id) {
-    setAlertRules(alertRules.filter(r => r.id !== id))
-  }
-
-  function toggleRule(id) {
-    setAlertRules(alertRules.map(r => r.id === id ? { ...r, enabled: !r.enabled } : r))
-  }
-
-  async function requestNotifPermission() {
-    if (!('Notification' in window)) { setNotifStatus('Not supported in this browser'); return }
+  async function requestNotif() {
+    if (!('Notification' in window)) return
     const perm = await Notification.requestPermission()
-    setNotifStatus(perm === 'granted' ? 'Notifications enabled ✓' : 'Permission denied')
+    toast(perm === 'granted' ? '✅' : '❌', 'Notifications', perm === 'granted' ? 'Enabled' : 'Permission denied')
   }
-
-  const notifPerm = 'Notification' in window ? Notification.permission : 'unavailable'
 
   return (
     <div className="view active" id="view-settings">
+      <div className="settings-grid">
 
-      {/* Anthropic API Key */}
-      <section className="settings-section">
-        <div className="settings-section-title">Anthropic API Key</div>
-        <div className="settings-section-desc">Required for AI commit analysis, PR review, insights, and stale branch detection. Stored in sessionStorage — cleared when you close this tab.</div>
-        {keySaved ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12 }}>
-            <span style={{ fontSize: 13, color: 'var(--green)' }}>✓ API key saved for this session</span>
-            <button className="abtn" style={{ fontSize: 11, color: 'var(--red)', borderColor: 'var(--red-dim)' }} onClick={removeKey}>Remove</button>
-          </div>
-        ) : (
-          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-            <input
-              type="password"
-              placeholder="sk-ant-api03-…"
-              value={keyInput}
-              onChange={e => setKeyInput(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && saveKey()}
-              style={{ flex: 1, background: 'var(--s2)', border: '1px solid var(--border)', borderRadius: 'var(--r-btn)', padding: '9px 12px', color: 'var(--text)', fontFamily: 'var(--mono)', fontSize: 12, outline: 'none' }}
-            />
-            <button className="btn btn-primary" onClick={saveKey} style={{ fontSize: 12 }}>Save Key</button>
-          </div>
-        )}
-        <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text3)' }}>
-          Get your key at{' '}
-          <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener" style={{ color: 'var(--blue)' }}>console.anthropic.com</a>
-        </div>
-      </section>
-
-      {/* Preferences */}
-      <section className="settings-section">
-        <div className="settings-section-title">Analysis Preferences</div>
-        {[
-          { key: 'autoAnalyze',    label: 'Auto-analyze on expand',    desc: 'Automatically run AI analysis when you expand a commit or PR' },
-          { key: 'securityScan',   label: 'Security file scanner',     desc: 'Show 🔒 badge when commits touch auth, crypto, or config files' },
-          { key: 'showSuggested',  label: 'Suggested commit messages',  desc: 'Show AI-generated improved commit message when the original is vague' },
-        ].map(({ key, label, desc }) => (
-          <div key={key} className="settings-pref-row" onClick={() => togglePref(key)}>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 13, color: 'var(--text)', fontWeight: 500 }}>{label}</div>
-              <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 2 }}>{desc}</div>
+        {/* Anthropic API Key */}
+        <div className="sc">
+          <div className="sc-title">Anthropic API Key</div>
+          {keySaved ? (
+            <div className="srow">
+              <div className="srow-lbl">Key saved for this session ✓</div>
+              <button className="abtn" onClick={removeKey} style={{ color: 'var(--red)', borderColor: 'var(--red-dim)', fontSize: 11 }}>Remove</button>
             </div>
-            <div className={`toggle ${settings[key] ? 'on' : ''}`}></div>
-          </div>
-        ))}
-      </section>
-
-      {/* Connected account */}
-      <section className="settings-section">
-        <div className="settings-section-title">Connected Account</div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 10 }}>
-          {ghUser?.avatar_url
-            ? <img src={ghUser.avatar_url} alt="avatar" style={{ width: 36, height: 36, borderRadius: '50%', border: '2px solid var(--border2)' }} />
-            : <div className="av" style={{ width: 36, height: 36, fontSize: 14 }}>{(ghUser?.login || '?')[0].toUpperCase()}</div>
-          }
-          <div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>{ghUser?.login || '—'}</div>
-            <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 2 }}>
-              {ghToken ? `Token: ${ghToken.slice(0, 8)}…` : 'No token'}
-            </div>
+          ) : (
+            <>
+              <input
+                type="password"
+                className="api-inp"
+                placeholder="sk-ant-api03-…"
+                value={keyInput}
+                onChange={e => setKeyInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && saveKey()}
+              />
+              <button className="btn btn-primary" onClick={saveKey} style={{ width: '100%', justifyContent: 'center' }}>Save Key</button>
+            </>
+          )}
+          <div className="api-note">
+            Key is stored in sessionStorage only. Cleared when the tab closes. Required for AI analysis.
           </div>
         </div>
-        {currentRepo && (
-          <div style={{ marginTop: 14, padding: '10px 14px', background: 'var(--s2)', borderRadius: 'var(--r-btn)', border: '1px solid var(--border)' }}>
-            <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '.8px', fontWeight: 700 }}>Active repo</div>
-            <div style={{ fontSize: 13, fontFamily: 'var(--mono)', color: 'var(--text)' }}>{currentRepo.full_name}</div>
-            <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 2 }}>
-              {currentRepo.private ? '🔒 Private' : '🌐 Public'} · {currentRepo.language || 'Unknown language'} · ★ {currentRepo.stargazers_count}
-            </div>
-          </div>
-        )}
-      </section>
 
-      {/* Cache */}
-      <section className="settings-section">
-        <div className="settings-section-title">
-          Analysis Cache
-          <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--text3)', fontWeight: 400 }}>{totalCached} item{totalCached !== 1 ? 's' : ''}</span>
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 8, marginTop: 10 }}>
-          {cacheStats.map(s => (
-            <div key={s.label} style={{ padding: '8px 12px', background: 'var(--s2)', borderRadius: 'var(--r-btn)', border: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: 12, color: 'var(--text2)' }}>{s.label}</span>
-              <span style={{ fontSize: 12, fontWeight: 700, color: s.count > 0 ? 'var(--blue)' : 'var(--text3)', fontFamily: 'var(--mono)' }}>{s.count}</span>
+        {/* Analysis Preferences */}
+        <div className="sc">
+          <div className="sc-title">Analysis Preferences</div>
+          {[
+            { key: 'autoAnalyze',   label: 'Auto-analyse on expand',  sub: 'Call Claude when commit is opened' },
+            { key: 'securityScan',  label: 'Security scanning',        sub: 'Red badge for auth/security files' },
+            { key: 'showSuggested', label: 'Show suggested messages',  sub: 'Display improved commit messages' },
+          ].map(({ key, label, sub }) => (
+            <div key={key} className="srow" style={{ cursor: 'pointer' }} onClick={() => setSettings({ ...settings, [key]: !settings[key] })}>
+              <div>
+                <div className="srow-lbl">{label}</div>
+                <div className="srow-sub">{sub}</div>
+              </div>
+              <label className="toggle" onClick={e => e.stopPropagation()}>
+                <input type="checkbox" checked={settings[key]} onChange={() => setSettings({ ...settings, [key]: !settings[key] })} />
+                <span className="t-track"></span>
+                <span className="t-thumb"></span>
+              </label>
             </div>
           ))}
         </div>
-        <button
-          className="btn"
-          onClick={() => { clearAllCaches(); toast('🗑️', 'Cache cleared', 'All analysis cache cleared') }}
-          disabled={totalCached === 0}
-          style={{ marginTop: 12, fontSize: 12, color: 'var(--red)', borderColor: 'var(--red-dim)' }}
-        >
-          Clear all cache
-        </button>
-      </section>
 
-      {/* Alert rules */}
-      <section className="settings-section">
-        <div className="settings-section-title">Alert Rules</div>
-        <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 12 }}>
-          Rules are evaluated during silent refresh (every 2 min). Triggered alerts appear in the notification panel.
+        {/* Connected Repository */}
+        <div className="sc fw">
+          <div className="sc-title">Connected Repository</div>
+          <div className="status-row">
+            <div className="status-dot"></div>
+            {currentRepo?.full_name || '—'} — {currentRepo?.private ? 'Private' : 'Public'}
+          </div>
+          <div className="srow" style={{ marginTop: 8 }}>
+            <div className="srow-lbl">Last fetched</div>
+            <span style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'var(--mono)' }}>just now</span>
+          </div>
+          <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
+            <button className="btn" onClick={backToRepos}>← Switch Repo</button>
+            <button className="btn" onClick={disconnect} style={{ color: 'var(--red)', borderColor: 'var(--red-dim)' }}>Disconnect GitHub</button>
+          </div>
         </div>
 
-        {alertRules.length > 0 && (
-          <div style={{ marginBottom: 14 }}>
-            {alertRules.map(rule => {
-              const meta = ALERT_METRICS.find(m => m.value === rule.metric)
-              const needsN = rule.metric !== 'risk_high'
-              return (
-                <div key={rule.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
-                  <div className={`toggle ${rule.enabled ? 'on' : ''}`} onClick={() => toggleRule(rule.id)} style={{ cursor: 'pointer' }}></div>
-                  <span style={{ flex: 1, fontSize: 12, color: rule.enabled ? 'var(--text)' : 'var(--text3)' }}>
-                    {meta?.label}{needsN ? ` (${rule.threshold})` : ''}
-                  </span>
-                  <button
-                    onClick={() => removeRule(rule.id)}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 16, lineHeight: 1, padding: '0 4px' }}
-                  >✕</button>
-                </div>
-              )
-            })}
-          </div>
-        )}
-
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-          <div style={{ flex: 2, minWidth: 180 }}>
-            <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 4 }}>Condition</div>
-            <select
-              value={newRuleMetric}
-              onChange={e => setNewRuleMetric(e.target.value)}
-              className="ins-author-sel"
-              style={{ width: '100%' }}
-            >
-              {ALERT_METRICS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
-            </select>
-          </div>
-          {newRuleMetric !== 'risk_high' && (
-            <div style={{ width: 80 }}>
-              <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 4 }}>Threshold</div>
-              <input
-                type="number"
-                min={1}
-                value={newRuleThreshold}
-                onChange={e => setNewRuleThreshold(e.target.value)}
-                style={{ width: '100%', background: 'var(--s2)', border: '1px solid var(--border)', borderRadius: 'var(--r-btn)', padding: '7px 10px', color: 'var(--text)', fontSize: 13, outline: 'none' }}
-              />
+        {/* Analysis Cache */}
+        <div className="sc fw">
+          <div className="sc-title">Analysis Cache</div>
+          {[
+            ['Cached commit analyses', commitAnalysisCache.size],
+            ['Cached PR analyses',     prAnalysisCache.size],
+            ['Commit details',         commitDetailCache.size],
+            ['PR files/reviews',       prFilesCache.size + prReviewsCache.size],
+            ['Comments',               prCommentsCache.size + prReviewCommentsCache.size],
+            ['AI reviews & risk',      prReviewAICache.size + prRiskCache.size],
+          ].map(([label, count]) => (
+            <div key={label} className="srow">
+              <div className="srow-lbl">{label}</div>
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--text2)' }}>{count}</span>
             </div>
-          )}
-          <button className="btn btn-primary" onClick={addRule} style={{ fontSize: 12 }}>
-            Add Rule
-          </button>
-        </div>
-      </section>
-
-      {/* Browser notifications */}
-      <section className="settings-section">
-        <div className="settings-section-title">Browser Notifications</div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 10 }}>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 13, color: 'var(--text2)' }}>
-              Status: <span style={{ color: notifPerm === 'granted' ? 'var(--green)' : notifPerm === 'denied' ? 'var(--red)' : 'var(--text3)' }}>
-                {notifPerm === 'granted' ? 'Enabled' : notifPerm === 'denied' ? 'Blocked by browser' : notifPerm === 'unavailable' ? 'Not supported' : 'Not yet granted'}
-              </span>
-            </div>
-            {notifStatus && <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 4 }}>{notifStatus}</div>}
-          </div>
-          {notifPerm !== 'granted' && notifPerm !== 'unavailable' && (
-            <button className="btn" onClick={requestNotifPermission} style={{ fontSize: 12 }}>
-              Enable Notifications
+          ))}
+          <div style={{ marginTop: 12 }}>
+            <button className="btn" onClick={() => { clearAllCaches(); toast('🗑️', 'Cache cleared', `${cacheTotal} items cleared`) }} disabled={cacheTotal === 0}>
+              Clear Analysis Cache
             </button>
-          )}
+          </div>
         </div>
-      </section>
 
+        {/* Alerts & Notifications */}
+        <div className="sc fw">
+          <div className="sc-title">Alerts &amp; Notifications</div>
+
+          <div className="srow">
+            <div>
+              <div className="srow-lbl">Browser Notifications</div>
+              <div className="srow-sub">OS-level alerts when the tab is in the background</div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span className={`perm-status ${notifPerm === 'granted' ? 'perm-granted' : notifPerm === 'denied' ? 'perm-denied' : 'perm-default'}`}>
+                {notifPerm === 'granted' ? 'Enabled' : notifPerm === 'denied' ? 'Blocked' : notifPerm === 'unsupported' ? 'Not supported' : 'Not requested'}
+              </span>
+              {notifPerm !== 'granted' && notifPerm !== 'unsupported' && (
+                <button className="btn" onClick={requestNotif} style={{ fontSize: 12 }}>Enable</button>
+              )}
+            </div>
+          </div>
+
+          <div style={{ marginTop: 20 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.8px', marginBottom: 10 }}>Alert Rules</div>
+            <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 10 }}>
+              Rules are evaluated on every 2-minute auto-refresh. Alerts appear as OS notifications, in-app toasts, and in the Alerts feed.
+            </div>
+
+            <div id="alert-rules-list">
+              {alertRules.map(rule => {
+                const meta = RULE_TYPES.find(r => r.value === rule.type)
+                const needsParam = ['pr_stale', 'author_commit', 'author_pr'].includes(rule.type)
+                return (
+                  <div key={rule.id} className="rule-item">
+                    <label className="toggle" style={{ flexShrink: 0 }}>
+                      <input type="checkbox" checked={rule.enabled} onChange={() => setAlertRules(alertRules.map(r => r.id === rule.id ? { ...r, enabled: !r.enabled } : r))} />
+                      <span className="t-track"></span>
+                      <span className="t-thumb"></span>
+                    </label>
+                    <div className="rule-label">
+                      <span className="rule-type-badge">{meta?.label}</span>
+                      {needsParam && rule.param && <span style={{ fontSize: 11, color: 'var(--text3)', marginLeft: 6 }}>— {rule.param}</span>}
+                    </div>
+                    <button
+                      onClick={() => setAlertRules(alertRules.filter(r => r.id !== rule.id))}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 16, lineHeight: 1, padding: '0 2px' }}
+                    >✕</button>
+                  </div>
+                )
+              })}
+            </div>
+
+            <div className="rule-builder">
+              <select id="new-rule-type" className="rule-select" value={newType} onChange={e => { setNewType(e.target.value); setNewParam('') }}>
+                {RULE_TYPES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+              </select>
+              {['pr_stale', 'author_commit', 'author_pr'].includes(newType) && (
+                <input
+                  id="new-rule-param"
+                  className="rule-param-inp"
+                  placeholder={RULE_HINTS[newType] || ''}
+                  value={newParam}
+                  onChange={e => setNewParam(e.target.value)}
+                />
+              )}
+              <button className="btn btn-primary" onClick={addRule} style={{ fontSize: 12 }}>+ Add Rule</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
     </div>
   )
 }

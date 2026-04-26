@@ -1,10 +1,10 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import useStore from '../../store/useStore.js'
 import { useToast } from '../../context/ToastContext.jsx'
 import { fetchBranches } from '../../api/github.js'
 import { analyzeStaleItems } from '../../api/anthropic.js'
-import { timeAgo, avatarColor, avatarInitial } from '../../utils/index.js'
+import { timeAgo } from '../../utils/index.js'
 
 export default function BranchesView() {
   const { API, currentRepo } = useStore()
@@ -12,12 +12,62 @@ export default function BranchesView() {
   const [staleResult, setStaleResult] = useState(null)
   const [staleLoading, setStaleLoading] = useState(false)
   const [showStale, setShowStale] = useState(false)
+  const [compareData, setCompareData] = useState({})
+  const [prs, setPrs] = useState([])
 
   const { data: branches = [], isLoading, refetch } = useQuery({
     queryKey: ['branches', API],
     queryFn: () => fetchBranches(API),
     enabled: !!API,
   })
+
+  const defaultBranch = currentRepo?.default_branch || 'main'
+  const ghToken = useStore.getState().ghToken
+
+  // Fetch ahead/behind for each non-default branch
+  useEffect(() => {
+    if (!branches.length || !API) return
+    const toCompare = branches.filter(b => b.name !== defaultBranch).slice(0, 20)
+    if (!toCompare.length) return
+
+    Promise.all(
+      toCompare.map(b =>
+        fetch(`${API}/compare/${encodeURIComponent(defaultBranch)}...${encodeURIComponent(b.name)}`, {
+          headers: {
+            Accept: 'application/vnd.github+json',
+            ...(ghToken ? { Authorization: `Bearer ${ghToken}` } : {}),
+          },
+        })
+          .then(r => r.ok ? r.json() : null)
+          .catch(() => null)
+      )
+    ).then(results => {
+      const map = {}
+      toCompare.forEach((b, i) => {
+        if (results[i]) {
+          map[b.name] = { ahead: results[i].ahead_by || 0, behind: results[i].behind_by || 0 }
+        }
+      })
+      setCompareData(map)
+    })
+  }, [branches.length, API, defaultBranch])
+
+  // Fetch open PRs to show PR badge on branch
+  useEffect(() => {
+    if (!API) return
+    fetch(`${API}/pulls?state=open&per_page=100`, {
+      headers: {
+        Accept: 'application/vnd.github+json',
+        ...(ghToken ? { Authorization: `Bearer ${ghToken}` } : {}),
+      },
+    })
+      .then(r => r.ok ? r.json() : [])
+      .then(setPrs)
+      .catch(() => [])
+  }, [API])
+
+  const prByHead = {}
+  prs.forEach(pr => { prByHead[pr.head.ref] = pr })
 
   async function handleAnalyzeStale() {
     if (staleResult) { setShowStale(s => !s); return }
@@ -36,11 +86,28 @@ export default function BranchesView() {
     } finally { setStaleLoading(false) }
   }
 
+  const branchData = branches.map(b => {
+    const isDefault = b.name === defaultBranch
+    const cmp       = compareData[b.name]
+    const ageDays   = b.commit?.commit?.author?.date
+      ? Math.floor((Date.now() - new Date(b.commit.commit.author.date)) / 86400000)
+      : null
+    return {
+      name: b.name, isDefault,
+      ahead:  cmp?.ahead  ?? 0,
+      behind: cmp?.behind ?? 0,
+      lastDate: b.commit?.commit?.author?.date || null,
+      ageDays,
+      sha: b.commit?.sha?.slice(0, 7) || '',
+      pr: prByHead[b.name] || null,
+    }
+  })
+
   return (
     <div className="view active" id="view-branches">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
         <div style={{ fontSize: 13, color: 'var(--text3)' }} id="branch-meta">
-          {branches.length} branch{branches.length !== 1 ? 'es' : ''}
+          {branches.length} branch{branches.length !== 1 ? 'es' : ''}{defaultBranch ? ` · default: ${defaultBranch}` : ''}
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button
@@ -67,10 +134,10 @@ export default function BranchesView() {
             <span className="stale-panel-title">AI Branch &amp; Activity Analysis</span>
             <button onClick={() => setShowStale(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 16, lineHeight: 1 }}>✕</button>
           </div>
-          <div id="stale-panel-body" style={{ padding: 16 }}>
+          <div style={{ padding: 16 }}>
             <p style={{ fontSize: 13, color: 'var(--text2)', lineHeight: 1.6, marginBottom: 12 }}>{staleResult.summary}</p>
             {staleResult.stale?.length > 0 && (
-              <div style={{ marginBottom: 12 }}>
+              <div>
                 <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.8px', color: 'var(--text3)', marginBottom: 8 }}>Consider deleting</div>
                 {staleResult.stale.map((b, i) => (
                   <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
@@ -86,46 +153,44 @@ export default function BranchesView() {
 
       {/* Branch list */}
       {isLoading ? (
-        <div>
-          {[1, 2, 3].map(i => <div key={i} className="skeleton" style={{ height: 64, marginBottom: 8 }}></div>)}
-        </div>
+        <div>{[1,2,3].map(i => <div key={i} className="skeleton" style={{ height: 64, marginBottom: 8 }}></div>)}</div>
       ) : branches.length === 0 ? (
         <div className="empty-state"><h3>No branches</h3><p>Could not load branch data.</p></div>
       ) : (
         <div id="branch-list">
-          {branches.map(b => {
-            const author  = b.commit?.commit?.author?.name || '?'
-            const date    = b.commit?.commit?.author?.date
-            const isDefault = b.name === currentRepo?.default_branch
+          {branchData.map(b => {
+            const stale = !b.isDefault && b.ageDays !== null && b.ageDays > 60
             return (
               <div key={b.name} className="branch-card">
-                <div className="branch-info">
+                <div>
                   <div className="branch-name">
-                    <svg viewBox="0 0 16 16" fill="currentColor" width="14" height="14" style={{ color: 'var(--text3)', flexShrink: 0 }}><path d="M11.75 2.5a.75.75 0 100 1.5.75.75 0 000-1.5zm-2.25.75a2.25 2.25 0 113 2.122V6A2.5 2.5 0 0110 8.5H6a1 1 0 00-1 1v1.128a2.251 2.251 0 11-1.5 0V5.372a2.25 2.25 0 111.5 0v1.836A2.492 2.492 0 016 7h4a1 1 0 001-1v-.628A2.25 2.25 0 019.5 3.25zM4.25 12a.75.75 0 100 1.5.75.75 0 000-1.5zM3.5 3.25a.75.75 0 111.5 0 .75.75 0 01-1.5 0z"/></svg>
                     {b.name}
-                    {isDefault && <span className="branch-default">default</span>}
+                    {b.isDefault && <span className="branch-default-badge">default</span>}
+                    {b.pr && <span className="branch-pr-badge">PR #{b.pr.number}</span>}
+                    {stale && <span className="branch-stale">stale</span>}
                   </div>
-                  {b.commit?.sha && (
-                    <div className="branch-commit">
-                      <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text3)' }}>{b.commit.sha.slice(0, 7)}</span>
-                      <span style={{ fontSize: 12, color: 'var(--text2)' }}>{b.commit.commit?.message?.split('\n')[0]?.slice(0, 60)}</span>
-                    </div>
-                  )}
+                  <div className="branch-meta-row" style={{ marginTop: 5 }}>
+                    {!b.isDefault && b.ahead > 0 && <span className="branch-ahead">+{b.ahead} ahead</span>}
+                    {!b.isDefault && b.behind > 0 && <span className="branch-behind">{b.behind} behind</span>}
+                    {b.lastDate && <span className="branch-stat">Last commit {timeAgo(b.lastDate)}</span>}
+                    {b.sha && <span className="branch-stat" style={{ fontFamily: 'var(--mono)' }}>{b.sha}</span>}
+                    {b.ageDays !== null && !b.isDefault && <span className="branch-stat">{b.ageDays}d old</span>}
+                  </div>
                 </div>
-                <div className="branch-meta">
-                  {author && <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <div className="av" style={{ width: 20, height: 20, fontSize: 9, flexShrink: 0, background: avatarColor(author) }}>{avatarInitial(author)}</div>
-                    <span style={{ fontSize: 12, color: 'var(--text3)' }}>{author}</span>
-                  </div>}
-                  {date && <span style={{ fontSize: 11, color: 'var(--text3)' }}>{timeAgo(date)}</span>}
+                <div className="branch-actions">
+                  {b.pr && (
+                    <button className="abtn" style={{ fontSize: 11 }} onClick={() => useStore.getState().switchView('prs')}>View PR</button>
+                  )}
+                  {!b.isDefault && !b.pr && (
+                    <button className="abtn" style={{ fontSize: 11 }} onClick={() => useStore.getState().switchView('prs')}>Open PR</button>
+                  )}
                   <a
                     className="abtn"
-                    href={`https://github.com/${currentRepo?.full_name}/tree/${b.name}`}
+                    style={{ fontSize: 11 }}
+                    href={`https://github.com/${currentRepo?.full_name || ''}/tree/${encodeURIComponent(b.name)}`}
                     target="_blank"
                     rel="noopener"
-                    style={{ fontSize: 11 }}
                   >
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="12" height="12"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
                     View
                   </a>
                 </div>

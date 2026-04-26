@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useInfiniteQuery } from '@tanstack/react-query'
 import useStore from '../../store/useStore.js'
 import { useToast } from '../../context/ToastContext.jsx'
@@ -6,12 +6,12 @@ import { fetchCommitsPage, fetchCommitDetail, PAGE_SIZE_COMMITS } from '../../ap
 import { analyzeCommit } from '../../api/anthropic.js'
 import {
   timeAgo, fmtDate, dayKey, avatarColor, avatarInitial,
-  detectType, typeCls, riskCls, esc,
+  detectType, typeCls, riskCls,
   hasSecurityTouch, renderPlainSummary, renderTechImpact,
-  renderRiskBadge, renderQualityBadge, renderDiff, splitLabel,
+  renderRiskBadge, renderQualityBadge, renderDiff, COLORS, TYPE_COLORS,
 } from '../../utils/index.js'
 
-export default function CommitsView({ onStatsChange }) {
+export default function CommitsView() {
   const {
     API, currentBranch, setCurrentBranch,
     commitAnalysisCache, commitDetailCache, settings,
@@ -23,7 +23,6 @@ export default function CommitsView({ onStatsChange }) {
   const [expandedCommits, setExpanded] = useState(new Set())
   const [branches, setBranches]     = useState([])
 
-  // Fetch branches for selector
   useEffect(() => {
     if (!API) return
     fetch(`${API}/branches?per_page=100`, {
@@ -50,11 +49,6 @@ export default function CommitsView({ onStatsChange }) {
 
   const commits = data?.pages.flat() ?? []
 
-  // Update parent stats
-  useEffect(() => {
-    if (onStatsChange) onStatsChange(commits, commitAnalysisCache)
-  }, [commits.length, commitAnalysisCache.size])
-
   function getDisplayType(commit) {
     const cached = commitAnalysisCache.get(commit.sha)
     return cached ? cached.change_type : detectType(commit.commit.message)
@@ -67,6 +61,64 @@ export default function CommitsView({ onStatsChange }) {
     return true
   })
 
+  // Stats
+  const uniqueAuthors = new Set(commits.map(c => c.commit.author.name)).size
+  const analyzedList  = [...commitAnalysisCache.values()]
+  const highRisk      = analyzedList.filter(a => a?.risk_level?.startsWith('High')).length
+  const goodPct       = analyzedList.length > 0
+    ? Math.round(analyzedList.filter(a => a?.quality?.startsWith('Good')).length / analyzedList.length * 100)
+    : null
+
+  // Right panel data
+  const typeCounts = useMemo(() => {
+    const counts = {}
+    commits.forEach(c => { const t = getDisplayType(c); counts[t] = (counts[t] || 0) + 1 })
+    return Object.entries(counts).sort((a, b) => b[1] - a[1])
+  }, [commits.length, commitAnalysisCache.size])
+
+  const maxTypeCount = typeCounts[0]?.[1] || 1
+
+  // Risk donut data from cache
+  const riskCounts = useMemo(() => {
+    const r = { High: 0, Medium: 0, Low: 0 }
+    analyzedList.forEach(a => {
+      if (a?.risk_level?.startsWith('High')) r.High++
+      else if (a?.risk_level?.startsWith('Medium')) r.Medium++
+      else if (a?.risk_level) r.Low++
+    })
+    return r
+  }, [commitAnalysisCache.size])
+
+  // Heatmap: commits per day-of-week this month
+  const heatmapData = useMemo(() => {
+    const now = new Date()
+    const month = now.getMonth()
+    const year  = now.getFullYear()
+    const grid  = Array(35).fill(0)
+    commits.forEach(c => {
+      const d = new Date(c.commit.author.date)
+      if (d.getMonth() === month && d.getFullYear() === year) {
+        const day = d.getDate() - 1
+        if (day < 35) grid[day]++
+      }
+    })
+    return grid
+  }, [commits.length])
+
+  const maxHeat = Math.max(...heatmapData, 1)
+
+  // Top contributors
+  const contributors = useMemo(() => {
+    const map = {}
+    commits.forEach(c => {
+      const name = c.commit.author.name
+      map[name] = (map[name] || 0) + 1
+    })
+    return Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 5)
+  }, [commits.length])
+
+  const maxContrib = contributors[0]?.[1] || 1
+
   // Group by date
   const groups = {}
   filtered.forEach(c => {
@@ -77,18 +129,13 @@ export default function CommitsView({ onStatsChange }) {
 
   async function toggleCommit(sha) {
     const next = new Set(expandedCommits)
-    if (next.has(sha)) {
-      next.delete(sha)
-      setExpanded(next)
-      return
-    }
+    if (next.has(sha)) { next.delete(sha); setExpanded(next); return }
     next.add(sha)
     setExpanded(new Set(next))
-
     if (settings.autoAnalyze && !commitAnalysisCache.has(sha)) {
       try {
         await fetchCommitDetail(API, sha)
-        setExpanded(new Set(next)) // trigger re-render for files
+        setExpanded(new Set(next))
         await analyzeCommit(API, sha)
         setExpanded(new Set(next))
       } catch (e) {
@@ -115,90 +162,222 @@ export default function CommitsView({ onStatsChange }) {
   }
 
   const TYPES = ['All', 'Feature', 'Bug Fix', 'Refactor', 'Chore', 'Docs', 'Tests', 'Performance', 'Security']
+  const monthName = new Date().toLocaleString('default', { month: 'long', year: 'numeric' })
+  const DOW = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
 
   return (
     <div className="view active" id="view-commits">
-      {/* Commit controls */}
-      <div className="commit-controls">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, flexWrap: 'wrap' }}>
-          <div className="search-wrap">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            <input
-              className="search-input"
-              id="commit-search"
-              type="text"
-              placeholder="Search author or SHA…"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-            />
-          </div>
-          {branches.length > 0 && (
-            <select
-              id="branch-select"
-              className="ins-author-sel"
-              value={currentBranch}
-              onChange={e => setCurrentBranch(e.target.value)}
-              style={{ fontFamily: 'var(--mono)', fontSize: 12 }}
-            >
-              <option value="">Default branch</option>
-              {branches.map(b => <option key={b.name} value={b.name}>{b.name}</option>)}
-            </select>
-          )}
+      {/* Stats row */}
+      <div className="stats-row">
+        <div className="stat-card">
+          <div className="stat-label">Total Commits</div>
+          <div className="stat-value">{commits.length || '—'}</div>
+          <div className="stat-sub">last {commits.length} fetched</div>
         </div>
-        <div className="filter-tabs" id="commit-filters">
-          {TYPES.map(t => (
-            <button key={t} className={`ftab${filter === t ? ' active' : ''}`} onClick={() => setFilter(t)}>{t}</button>
-          ))}
+        <div className="stat-card">
+          <div className="stat-label">Contributors</div>
+          <div className="stat-value">{uniqueAuthors || '—'}</div>
+          <div className="stat-sub">unique authors</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">High Risk</div>
+          <div className="stat-value">{highRisk > 0 ? highRisk : '—'}</div>
+          <div className="stat-sub">from AI analysis</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">Avg Quality</div>
+          <div className="stat-value">{goodPct !== null ? goodPct + '%' : '—'}</div>
+          <div className="stat-sub">% Good commits</div>
         </div>
       </div>
 
-      {/* Commit list */}
-      {isFetching && !isFetchingNextPage && commits.length === 0 ? (
+      {/* Two-column layout */}
+      <div className="two-col">
+        {/* Left: list */}
         <div>
-          {[1, 2, 3].map(i => <div key={i} className="skeleton" style={{ height: 64, marginBottom: 8 }}></div>)}
-        </div>
-      ) : filtered.length === 0 ? (
-        <div className="empty-state"><h3>No commits match</h3><p>Try a different search or filter.</p></div>
-      ) : (
-        <div id="commit-list">
-          {Object.keys(groups).sort((a, b) => b.localeCompare(a)).map(k => (
-            <div key={k}>
-              <div className="date-div">{fmtDate(groups[k][0].commit.author.date)}</div>
-              {groups[k].map(c => (
-                <CommitCard
-                  key={c.sha}
-                  commit={c}
-                  isExpanded={expandedCommits.has(c.sha)}
-                  analysis={commitAnalysisCache.get(c.sha)}
-                  detail={commitDetailCache.get(c.sha)}
-                  displayType={getDisplayType(c)}
-                  settings={settings}
-                  commits={commits}
-                  currentRepo={useStore.getState().currentRepo}
-                  onToggle={toggleCommit}
-                  onCopySHA={copySHA}
-                  onBookmark={bookmark}
-                />
+          <div style={{ display: 'flex', gap: 8, marginBottom: 14, alignItems: 'center' }}>
+            <div className="search-bar" style={{ flex: 1, marginBottom: 0 }}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <input
+                id="commit-search"
+                type="text"
+                placeholder="Search by author or SHA…"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+              />
+            </div>
+            {branches.length > 0 && (
+              <select
+                id="branch-select"
+                value={currentBranch}
+                onChange={e => setCurrentBranch(e.target.value)}
+                style={{ background: 'var(--s1)', border: '1px solid var(--border)', borderRadius: 'var(--r-btn)', padding: '10px 12px', color: 'var(--text)', fontFamily: 'var(--mono)', fontSize: 12, outline: 'none', cursor: 'pointer', width: 150, flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}
+              >
+                <option value="">Default branch</option>
+                {branches.map(b => <option key={b.name} value={b.name}>{b.name}</option>)}
+              </select>
+            )}
+          </div>
+
+          <div className="filter-tabs" id="commit-filters">
+            {TYPES.map(t => (
+              <button key={t} className={`ftab${filter === t ? ' active' : ''}`} onClick={() => setFilter(t)}>{t}</button>
+            ))}
+          </div>
+
+          {isFetching && !isFetchingNextPage && commits.length === 0 ? (
+            <div>{[1,2,3].map(i => <div key={i} className="skeleton" style={{ height: 64, marginBottom: 8 }}></div>)}</div>
+          ) : filtered.length === 0 ? (
+            <div className="empty-state"><h3>No commits match</h3><p>Try a different search or filter.</p></div>
+          ) : (
+            <div id="commit-list">
+              {Object.keys(groups).sort((a, b) => b.localeCompare(a)).map(k => (
+                <div key={k}>
+                  <div className="date-div">{fmtDate(groups[k][0].commit.author.date)}</div>
+                  {groups[k].map(c => (
+                    <CommitCard
+                      key={c.sha}
+                      commit={c}
+                      isExpanded={expandedCommits.has(c.sha)}
+                      analysis={commitAnalysisCache.get(c.sha)}
+                      detail={commitDetailCache.get(c.sha)}
+                      displayType={getDisplayType(c)}
+                      settings={settings}
+                      commits={commits}
+                      currentRepo={useStore.getState().currentRepo}
+                      onToggle={toggleCommit}
+                      onCopySHA={copySHA}
+                      onBookmark={bookmark}
+                    />
+                  ))}
+                </div>
               ))}
             </div>
-          ))}
-        </div>
-      )}
+          )}
 
-      {/* Load more */}
-      {hasNextPage && (
-        <div id="load-more-commits">
-          <button
-            id="load-more-commits-btn"
-            className="btn"
-            disabled={isFetchingNextPage}
-            onClick={() => fetchNextPage()}
-            style={{ width: '100%', justifyContent: 'center', margin: '12px 0' }}
-          >
-            {isFetchingNextPage ? 'Loading…' : `Load more commits (${commits.length} loaded)`}
-          </button>
+          {hasNextPage && (
+            <div id="load-more-commits">
+              <button
+                className="btn"
+                disabled={isFetchingNextPage}
+                onClick={() => fetchNextPage()}
+                style={{ width: '100%', justifyContent: 'center', margin: '12px 0' }}
+              >
+                {isFetchingNextPage ? 'Loading…' : `Load more commits (${commits.length} loaded)`}
+              </button>
+            </div>
+          )}
         </div>
-      )}
+
+        {/* Right: panels */}
+        <div>
+          <div className="panel">
+            <div className="panel-title">
+              Commit Types
+              <a href="#" onClick={e => { e.preventDefault(); window.dispatchEvent(new CustomEvent('gd:exportCSV')) }}>Export</a>
+            </div>
+            {typeCounts.length === 0
+              ? <div style={{ fontSize: 12, color: 'var(--text3)' }}>Expand commits to generate analysis</div>
+              : typeCounts.map(([type, count]) => (
+                <div key={type} className="bar-row">
+                  <div className="bar-label">{type}</div>
+                  <div className="bar-track">
+                    <div className="bar-fill" style={{ width: `${(count / maxTypeCount) * 100}%`, background: TYPE_COLORS[type] || 'var(--gold)' }}></div>
+                  </div>
+                  <div className="bar-cnt">{count}</div>
+                </div>
+              ))
+            }
+          </div>
+
+          <div className="panel">
+            <div className="panel-title">Risk Distribution</div>
+            {analyzedList.length === 0 ? (
+              <div className="donut-wrap"><div style={{ fontSize: 12, color: 'var(--text3)', textAlign: 'center', padding: '8px 0' }}>Expand commits<br />to generate analysis</div></div>
+            ) : (
+              <RiskDonut counts={riskCounts} total={analyzedList.length} />
+            )}
+          </div>
+
+          <div className="panel">
+            <div className="panel-title">Activity — <span>{monthName}</span></div>
+            <div className="heatmap-labels" id="hm-labels">
+              {DOW.map((d, i) => <div key={i} className="hm-lbl">{d}</div>)}
+            </div>
+            <div className="heatmap-grid" id="heatmap">
+              {heatmapData.map((count, i) => {
+                const alpha = count === 0 ? 0 : 0.1 + (count / maxHeat) * 0.9
+                return (
+                  <div
+                    key={i}
+                    className="hm-cell"
+                    data-tip={`${count} commit${count !== 1 ? 's' : ''}`}
+                    style={{ background: count === 0 ? undefined : `rgba(201,168,76,${alpha.toFixed(2)})` }}
+                  ></div>
+                )
+              })}
+            </div>
+          </div>
+
+          <div className="panel">
+            <div className="panel-title">
+              Top Contributors
+              <a href="#" onClick={e => { e.preventDefault(); useStore.getState().switchView('insights') }}>See all</a>
+            </div>
+            <div id="top-contribs">
+              {contributors.length === 0
+                ? <div style={{ fontSize: 12, color: 'var(--text3)' }}>No commits loaded yet</div>
+                : contributors.map(([name, count]) => (
+                  <div key={name} className="contrib-row">
+                    <div className="av" style={{ background: avatarColor(name), width: 24, height: 24, fontSize: 10, flexShrink: 0 }}>{avatarInitial(name)}</div>
+                    <div className="cname">{name}</div>
+                    <div className="ccnt">{count}</div>
+                    <div className="cbar"><div className="cbar-fill" style={{ width: `${(count / maxContrib) * 100}%` }}></div></div>
+                  </div>
+                ))
+              }
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function RiskDonut({ counts, total }) {
+  const colors = { High: 'var(--red)', Medium: 'var(--amber)', Low: 'var(--teal)' }
+  const r = 54, cx = 64, cy = 64, circumference = 2 * Math.PI * r
+  let offset = 0
+  const slices = Object.entries(counts)
+    .filter(([, v]) => v > 0)
+    .map(([key, val]) => {
+      const pct = val / total
+      const dashLen = pct * circumference
+      const slice = { key, val, pct, dashLen, offset, color: colors[key] }
+      offset += dashLen
+      return slice
+    })
+  return (
+    <div className="donut-wrap">
+      <svg width="128" height="128" viewBox="0 0 128 128">
+        <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--s3)" strokeWidth="14" />
+        {slices.map(s => (
+          <circle key={s.key} cx={cx} cy={cy} r={r} fill="none" stroke={s.color} strokeWidth="14"
+            strokeDasharray={`${s.dashLen} ${circumference - s.dashLen}`}
+            strokeDashoffset={-s.offset + circumference * 0.25}
+            style={{ transition: 'stroke-dasharray .6s ease' }} />
+        ))}
+        <text x={cx} y={cy - 4} textAnchor="middle" className="donut-center">{total}</text>
+        <text x={cx} y={cy + 14} textAnchor="middle" className="donut-center-sub">analysed</text>
+      </svg>
+      <div className="donut-legend">
+        {Object.entries(counts).filter(([, v]) => v > 0).map(([key, val]) => (
+          <div key={key} className="leg-item">
+            <div className="leg-dot" style={{ background: colors[key] }}></div>
+            {key} ({val})
+          </div>
+        ))}
+      </div>
     </div>
   )
 }

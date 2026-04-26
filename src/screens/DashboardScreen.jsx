@@ -13,19 +13,18 @@ import SettingsView from '../components/views/SettingsView.jsx'
 import ReportModal  from '../components/modals/ReportModal.jsx'
 import AskOverlay   from '../components/modals/AskOverlay.jsx'
 
-const REFRESH_INTERVAL = 2 * 60 * 1000 // 2 minutes
+const REFRESH_INTERVAL = 2 * 60 * 1000
 
 export default function DashboardScreen() {
   const { currentView, API, alertRules, addAlertFeedItem, alertUnread } = useStore()
   const queryClient = useQueryClient()
   const toast = useToast()
 
-  const [refreshing, setRefreshing]     = useState(false)
+  const [refreshing, setRefreshing]       = useState(false)
   const [refreshBanner, setRefreshBanner] = useState(false)
   const [openIssuesCount, setOpenIssuesCount] = useState(0)
-  const [commitStats, setCommitStats]   = useState({ commits: [], cache: new Map() })
-  const [reportOpen, setReportOpen]     = useState(false)
-  const [askOpen, setAskOpen]           = useState(false)
+  const [reportOpen, setReportOpen]       = useState(false)
+  const [askOpen, setAskOpen]             = useState(false)
 
   const timerRef = useRef(null)
 
@@ -34,8 +33,8 @@ export default function DashboardScreen() {
     try {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['commits', API] }),
-        queryClient.invalidateQueries({ queryKey: ['prs', API] }),
-        queryClient.invalidateQueries({ queryKey: ['issues', API] }),
+        queryClient.invalidateQueries({ queryKey: ['prs',     API] }),
+        queryClient.invalidateQueries({ queryKey: ['issues',  API] }),
         queryClient.invalidateQueries({ queryKey: ['branches', API] }),
       ])
       evaluateAlertRules()
@@ -44,24 +43,15 @@ export default function DashboardScreen() {
   }, [API, queryClient])
 
   function evaluateAlertRules() {
-    const { commitAnalysisCache, prAnalysisCache } = useStore.getState()
+    const { commitAnalysisCache } = useStore.getState()
     alertRules.filter(r => r.enabled).forEach(rule => {
       if (rule.metric === 'risk_high') {
-        const highRiskShas = [...commitAnalysisCache.entries()]
+        const shas = [...commitAnalysisCache.entries()]
           .filter(([, a]) => a?.risk_level?.startsWith('High'))
           .map(([sha]) => sha.slice(0, 7))
-        if (highRiskShas.length > 0) {
-          addAlertFeedItem({
-            id: Date.now() + Math.random(),
-            type: 'commit',
-            title: `High-risk commit${highRiskShas.length > 1 ? 's' : ''} detected`,
-            body: highRiskShas.join(', '),
-            time: new Date().toISOString(),
-            read: false,
-          })
-          if (Notification.permission === 'granted') {
-            new Notification('Git Digest — High Risk Commit', { body: highRiskShas.join(', ') })
-          }
+        if (shas.length > 0) {
+          addAlertFeedItem({ id: Date.now() + Math.random(), type: 'commit', title: 'High-risk commit detected', body: shas.join(', '), time: new Date().toISOString(), read: false })
+          if (Notification.permission === 'granted') new Notification('Git Digest — High Risk Commit', { body: shas.join(', ') })
         }
       }
     })
@@ -77,9 +67,9 @@ export default function DashboardScreen() {
     setRefreshBanner(false)
     try {
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['commits', API] }),
-        queryClient.invalidateQueries({ queryKey: ['prs', API] }),
-        queryClient.invalidateQueries({ queryKey: ['issues', API] }),
+        queryClient.invalidateQueries({ queryKey: ['commits',  API] }),
+        queryClient.invalidateQueries({ queryKey: ['prs',      API] }),
+        queryClient.invalidateQueries({ queryKey: ['issues',   API] }),
         queryClient.invalidateQueries({ queryKey: ['branches', API] }),
       ])
       toast('✅', 'Refreshed', 'Data updated')
@@ -90,52 +80,36 @@ export default function DashboardScreen() {
     }
   }
 
-  function loadUpdates() {
-    setRefreshBanner(false)
-    handleRefresh()
-  }
-
   return (
-    <div id="screen-dashboard" style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
+    <>
       <Sidebar openIssuesCount={openIssuesCount} alertUnread={alertUnread} />
-
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
-        <Topbar
-          onRefresh={handleRefresh}
-          refreshing={refreshing}
-          onOpenReport={() => setReportOpen(true)}
-          onOpenAsk={() => setAskOpen(true)}
-          commits={commitStats.commits}
-        />
-
+      <Topbar
+        onRefresh={handleRefresh}
+        refreshing={refreshing}
+        onOpenReport={() => setReportOpen(true)}
+        onOpenAsk={() => setAskOpen(true)}
+      />
+      <main className="main">
         {refreshBanner && (
-          <div id="refresh-banner" style={{ background: 'var(--teal-dim)', borderBottom: '1px solid var(--teal)', padding: '8px 20px', display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, color: 'var(--teal)' }}>
-            <span>New activity detected.</span>
-            <button
-              onClick={loadUpdates}
-              style={{ background: 'none', border: '1px solid var(--teal)', borderRadius: 'var(--r-btn)', padding: '2px 10px', color: 'var(--teal)', cursor: 'pointer', fontSize: 12 }}
-            >
-              Load updates
-            </button>
-            <button
-              onClick={() => setRefreshBanner(false)}
-              style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--teal)', fontSize: 16, lineHeight: 1 }}
-            >✕</button>
+          <div id="refresh-banner" style={{ position: 'sticky', top: 0, zIndex: 100, background: 'var(--teal-dim)', border: '1px solid var(--teal)', borderRadius: 8, padding: '10px 16px', marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+            <span style={{ fontSize: 13, color: 'var(--teal)' }}>New activity detected.</span>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn" onClick={handleRefresh} style={{ fontSize: 12, color: 'var(--teal)', borderColor: 'var(--teal)' }}>Load updates</button>
+              <button onClick={() => setRefreshBanner(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 16, lineHeight: 1 }}>✕</button>
+            </div>
           </div>
         )}
 
-        <main className="main-content" style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
-          {currentView === 'commits'  && <CommitsView  onStatsChange={(commits, cache) => setCommitStats({ commits, cache })} />}
-          {currentView === 'prs'      && <PRsView />}
-          {currentView === 'insights' && <InsightsView />}
-          {currentView === 'issues'   && <IssuesView onIssueCountChange={setOpenIssuesCount} />}
-          {currentView === 'branches' && <BranchesView />}
-          {currentView === 'settings' && <SettingsView />}
-        </main>
-      </div>
+        {currentView === 'commits'  && <CommitsView onIssueCountChange={setOpenIssuesCount} />}
+        {currentView === 'prs'      && <PRsView />}
+        {currentView === 'insights' && <InsightsView />}
+        {currentView === 'issues'   && <IssuesView onIssueCountChange={setOpenIssuesCount} />}
+        {currentView === 'branches' && <BranchesView />}
+        {currentView === 'settings' && <SettingsView />}
+      </main>
 
       {reportOpen && <ReportModal onClose={() => setReportOpen(false)} />}
       {askOpen    && <AskOverlay  onClose={() => setAskOpen(false)} />}
-    </div>
+    </>
   )
 }
