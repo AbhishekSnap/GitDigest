@@ -1,7 +1,7 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import useStore from '../store/useStore.js'
 import { useToast } from '../context/ToastContext.jsx'
-import { fetchAllRepos as apiFetchAllRepos } from '../api/github.js'
+import { fetchAllRepos as apiFetchAllRepos, fetchUser } from '../api/github.js'
 import {
   timeAgo, avatarColor, avatarInitial,
   LANG_COLORS, repoHeatScore, repoWaveform, esc,
@@ -16,26 +16,26 @@ function togglePin(fullName) {
 }
 
 export default function ReposScreen() {
-  const { ghUser, allRepos, setAllRepos, selectRepo, disconnect } = useStore()
+  const { ghUser, allRepos, setAllRepos, setUser, selectRepo, disconnect } = useStore()
   const toast = useToast()
 
-  const [search, setSearch]     = useState('')
-  const [filter, setFilter]     = useState('all')
-  const [sort, setSort]         = useState('pushed')
-  const [loading, setLoading]   = useState(false)
-  const [pinVersion, setPinVersion] = useState(0)   // bump to re-render after pin toggle
+  const [search, setSearch]         = useState('')
+  const [filter, setFilter]         = useState('all')
+  const [sort, setSort]             = useState('pushed')
+  const [pinVersion, setPinVersion] = useState(0)
+  const [repoLoading, setRepoLoading] = useState(false)
 
-  async function reload() {
-    setLoading(true)
-    try {
-      const repos = await apiFetchAllRepos()
-      setAllRepos(repos)
-    } catch (e) {
-      toast('❌', 'Failed to reload', e.message)
-    } finally {
-      setLoading(false)
+  useEffect(() => {
+    if (!ghUser) {
+      fetchUser().then(user => { if (user?.login) setUser(user) }).catch(() => {})
     }
-  }
+    if (!allRepos.length) {
+      setRepoLoading(true)
+      apiFetchAllRepos()
+        .then(repos => { setAllRepos(repos); setRepoLoading(false) })
+        .catch(() => setRepoLoading(false))
+    }
+  }, [])
 
   function handleTogglePin(e, fullName) {
     e.stopPropagation()
@@ -43,16 +43,16 @@ export default function ReposScreen() {
     setPinVersion(v => v + 1)
   }
 
-  const pinnedKeys  = useMemo(() => getPinnedRepos(), [pinVersion])
-  const recentKeys  = useMemo(() => JSON.parse(localStorage.getItem('gd_recent_repos') || '[]'), [])
-  const pinnedSet   = useMemo(() => new Set(pinnedKeys), [pinnedKeys])
-  const recentSet   = useMemo(() => new Set(recentKeys), [recentKeys])
+  const pinnedKeys = useMemo(() => getPinnedRepos(), [pinVersion])
+  const recentKeys = useMemo(() => JSON.parse(localStorage.getItem('gd_recent_repos') || '[]'), [])
+  const pinnedSet  = useMemo(() => new Set(pinnedKeys), [pinnedKeys])
+  const recentSet  = useMemo(() => new Set(recentKeys), [recentKeys])
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase()
     let list = allRepos.filter(r => {
       if (q && !r.full_name.toLowerCase().includes(q) && !(r.description || '').toLowerCase().includes(q)) return false
-      if (filter === 'owner' && (r.fork || r.owner?.login !== ghUser?.login)) return false
+      if (filter === 'owner'  && (r.fork || r.owner?.login !== ghUser?.login)) return false
       if (filter === 'fork'   && !r.fork) return false
       if (filter === 'issues' && !r.open_issues_count) return false
       return true
@@ -73,69 +73,62 @@ export default function ReposScreen() {
   const remaining    = showSections ? filtered.filter(r => !shownKeys.has(r.full_name)) : filtered
 
   return (
-    <div className="screen active" id="screen-repos">
+    <div className="screen-overlay active" id="screen-repos">
       <div className="blob blob-1"></div>
       <div className="blob blob-2"></div>
 
-      <div className="repos-topbar">
-        <div className="repos-topbar-left">
+      {/* Header bar */}
+      <div className="repos-header">
+        <div className="repos-user">
           {ghUser?.avatar_url
             ? <img className="repos-avatar" src={ghUser.avatar_url} alt={ghUser.login} />
-            : <div className="repos-avatar">{avatarInitial(ghUser?.login)}</div>
+            : <div className="repos-avatar-placeholder">{avatarInitial(ghUser?.login)}</div>
           }
           <span className="repos-login">{ghUser?.login || '—'}</span>
         </div>
-        <div className="repos-topbar-right">
-          <button
-            className={`btn${loading ? ' spinning' : ''}`}
-            onClick={reload}
-            title="Reload repositories"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
-            </svg>
-          </button>
-          <button className="btn" onClick={disconnect} style={{ color: 'var(--red)', borderColor: 'var(--red-dim)' }}>
-            Disconnect
-          </button>
-        </div>
+        <button
+          className="btn"
+          onClick={disconnect}
+          style={{ color: 'var(--red)', borderColor: 'var(--red-dim)' }}
+        >
+          Disconnect
+        </button>
       </div>
 
+      {/* Scrollable body */}
       <div className="repos-body">
-        <div className="repos-controls">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, flexWrap: 'wrap' }}>
-            <div className="repos-search-wrap">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-              <input
-                className="repos-search"
-                type="text"
-                placeholder="Search repositories…"
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-              />
-            </div>
-            <div className="filter-tabs" style={{ gap: 4 }}>
-              {['all','owner','fork','issues'].map(f => (
-                <button
-                  key={f}
-                  className={`filter-tab${filter === f ? ' active' : ''}`}
-                  onClick={() => setFilter(f)}
-                >
-                  {f === 'all' ? 'All' : f === 'owner' ? 'Mine' : f === 'fork' ? 'Forks' : 'Issues'}
-                </button>
-              ))}
-            </div>
+
+        {/* Search row */}
+        <div className="repos-search-row">
+          <input
+            type="text"
+            placeholder="Search repositories…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+        </div>
+
+        {/* Toolbar: filter tabs + count + sort */}
+        <div className="repos-toolbar">
+          <div className="repos-toolbar-left">
+            {[['all','All'],['owner','Mine'],['fork','Forks'],['issues','Has Issues']].map(([val, label]) => (
+              <button
+                key={val}
+                className={`filter-tab${filter === val ? ' active' : ''}`}
+                onClick={() => setFilter(val)}
+              >
+                {label}
+              </button>
+            ))}
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 12, color: 'var(--text3)' }} id="repos-count">
-              {filtered.length} repo{filtered.length !== 1 ? 's' : ''}
-            </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span className="repos-count">{filtered.length} repo{filtered.length !== 1 ? 's' : ''}</span>
             <select
-              className="ins-author-sel"
+              className="repos-sort"
               value={sort}
               onChange={e => setSort(e.target.value)}
             >
-              <option value="pushed">Recently pushed</option>
+              <option value="pushed">Last pushed</option>
               <option value="stars">Stars</option>
               <option value="forks">Forks</option>
               <option value="name">Name</option>
@@ -144,15 +137,19 @@ export default function ReposScreen() {
           </div>
         </div>
 
-        {!allRepos.length && !loading && (
-          <div style={{ color: 'var(--text3)', fontSize: 13, padding: 20 }}>No repositories found.</div>
+        {!allRepos.length && (
+          <div style={{ color: 'var(--text3)', fontSize: 13, padding: 20 }}>
+            {repoLoading ? 'Loading repositories…' : 'No repositories found.'}
+          </div>
         )}
 
         {showSections && pinnedRepos.length > 0 && (
           <>
             <div className="repos-section-label">Pinned</div>
             <div className="repo-grid" style={{ marginBottom: 24 }}>
-              {pinnedRepos.map(r => <RepoCard key={r.id} r={r} pinnedSet={pinnedSet} recentSet={recentSet} onPin={handleTogglePin} onSelect={selectRepo} />)}
+              {pinnedRepos.map(r => (
+                <RepoCard key={r.id} r={r} pinnedSet={pinnedSet} recentSet={recentSet} onPin={handleTogglePin} onSelect={selectRepo} />
+              ))}
             </div>
           </>
         )}
@@ -161,12 +158,14 @@ export default function ReposScreen() {
           <>
             <div className="repos-section-label">Recently visited</div>
             <div className="repo-grid" style={{ marginBottom: 24 }}>
-              {recentRepos.map(r => <RepoCard key={r.id} r={r} pinnedSet={pinnedSet} recentSet={recentSet} onPin={handleTogglePin} onSelect={selectRepo} isRecent />)}
+              {recentRepos.map(r => (
+                <RepoCard key={r.id} r={r} pinnedSet={pinnedSet} recentSet={recentSet} onPin={handleTogglePin} onSelect={selectRepo} isRecent />
+              ))}
             </div>
           </>
         )}
 
-        {showSections && (pinnedRepos.length > 0 || recentRepos.length > 0) && (
+        {showSections && (pinnedRepos.length > 0 || recentRepos.length > 0) && remaining.length > 0 && (
           <div className="repos-section-label">All repositories</div>
         )}
 
@@ -181,9 +180,9 @@ export default function ReposScreen() {
 }
 
 function RepoCard({ r, pinnedSet, recentSet, onPin, onSelect, isRecent }) {
-  const lang    = r.language || ''
-  const heat    = repoHeatScore(r)
-  const wave    = repoWaveform(r, heat.cls)
+  const lang     = r.language || ''
+  const heat     = repoHeatScore(r)
+  const wave     = repoWaveform(r, heat.cls)
   const isPinned = pinnedSet.has(r.full_name)
 
   return (

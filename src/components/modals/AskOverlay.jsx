@@ -17,8 +17,8 @@ export default function AskOverlay({ onClose }) {
   const queryClient = useQueryClient()
   const toast = useToast()
 
-  const [query, setQuery]     = useState('')
-  const [answer, setAnswer]   = useState('')
+  const [query, setQuery]   = useState('')
+  const [answer, setAnswer] = useState('')
   const [loading, setLoading] = useState(false)
 
   async function submit(q) {
@@ -28,12 +28,10 @@ export default function AskOverlay({ onClose }) {
     setLoading(true)
     setAnswer('')
     try {
-      // Pull from query cache for context — fall back to empty arrays
       const commitPages = queryClient.getQueryData(['commits', API])
       const commits = commitPages?.pages?.flat() ?? []
       const prPages = queryClient.getQueryData(['prs', API])
       const prs = prPages?.pages?.flat() ?? []
-
       const result = await submitAskQuery(text, currentRepo, commits, prs)
       setAnswer(result)
     } catch (e) {
@@ -49,60 +47,60 @@ export default function AskOverlay({ onClose }) {
   }
 
   return (
-    <div
-      style={{ position: 'fixed', inset: 0, zIndex: 9500, background: 'rgba(0,0,0,.6)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
-      onClick={e => e.target === e.currentTarget && onClose()}
-    >
-      <div style={{ background: 'var(--s1)', border: '1px solid var(--border2)', borderRadius: 'var(--r-card)', width: 600, maxWidth: '100%', padding: 28, position: 'relative', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
-        <button onClick={onClose} style={{ position: 'absolute', top: 14, right: 14, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 18, lineHeight: 1 }}>✕</button>
+    <div id="ask-overlay" className="open" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="ask-container">
 
-        <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)', marginBottom: 16 }}>
-          Ask about{' '}
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 14, color: 'var(--text2)' }}>{currentRepo?.full_name || 'this repo'}</span>
-        </div>
-
-        <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+        {/* Input row */}
+        <div className="ask-input-row">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="18" height="18"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           <input
+            className="ask-input"
             type="text"
             value={query}
             onChange={e => setQuery(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && !loading && submit()}
-            placeholder="Ask anything about this repository…"
+            placeholder={`Ask anything about ${currentRepo?.full_name || 'this repo'}…`}
             autoFocus
-            style={{ flex: 1, background: 'var(--s2)', border: '1px solid var(--border)', borderRadius: 'var(--r-btn)', padding: '10px 14px', color: 'var(--text)', fontFamily: 'var(--sans)', fontSize: 13, outline: 'none' }}
           />
-          <button className="btn btn-primary" onClick={() => submit()} disabled={loading || !query.trim()} style={{ fontSize: 12 }}>
+          <button
+            className="btn btn-primary"
+            onClick={() => submit()}
+            disabled={loading || !query.trim()}
+            style={{ fontSize: 12, padding: '6px 14px' }}
+          >
             {loading ? '…' : 'Ask'}
           </button>
+          <button
+            onClick={onClose}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 18, lineHeight: 1, marginLeft: 4 }}
+          >✕</button>
         </div>
 
+        {/* Suggestions */}
         {!answer && !loading && (
-          <div>
-            <div style={{ fontSize: 11, color: 'var(--text3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.8px', marginBottom: 8 }}>Suggestions</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {SUGGESTIONS.map((s, i) => (
-                <button
-                  key={i}
-                  onClick={() => submit(s)}
-                  style={{ background: 'var(--s2)', border: '1px solid var(--border)', borderRadius: 'var(--r-btn)', padding: '8px 12px', color: 'var(--text2)', fontSize: 12, cursor: 'pointer', textAlign: 'left' }}
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
+          <div className="ask-suggestions">
+            {SUGGESTIONS.map((s, i) => (
+              <button key={i} className="ask-pill" onClick={() => submit(s)}>{s}</button>
+            ))}
           </div>
         )}
 
+        {/* Loading */}
         {loading && (
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text3)', fontSize: 13 }}>
-            Thinking…
+          <div className="ai-thinking">
+            <div className="ai-dots">
+              <div className="ai-dot"></div>
+              <div className="ai-dot"></div>
+              <div className="ai-dot"></div>
+            </div>
+            <div className="ai-thinking-msg">Thinking…</div>
           </div>
         )}
 
+        {/* Answer */}
         {answer && (
-          <div style={{ flex: 1, overflowY: 'auto', marginTop: 4 }}>
-            <div style={{ fontSize: 11, color: 'var(--text3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.8px', marginBottom: 8 }}>Answer</div>
-            <div style={{ fontSize: 13, color: 'var(--text2)', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{answer}</div>
+          <div className="ask-result">
+            <div className="ask-card">{answer}</div>
           </div>
         )}
       </div>

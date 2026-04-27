@@ -20,7 +20,7 @@ const useStore = create((set, get) => ({
   currentView: 'commits',
   previousView: 'commits',
   currentBranch: '',
-  isLight: localStorage.getItem('gd_theme') !== 'dark',
+  isLight: localStorage.getItem('gd_theme') === 'light',
 
   // ── Settings
   settings: { autoAnalyze: true, securityScan: true, showSuggested: true },

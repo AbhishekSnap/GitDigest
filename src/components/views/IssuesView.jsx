@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import useStore from '../../store/useStore.js'
 import { useToast } from '../../context/ToastContext.jsx'
@@ -16,12 +16,13 @@ export default function IssuesView({ onIssueCountChange }) {
     queryKey: ['issues', API, filter],
     queryFn: () => fetchIssues(API, filter),
     enabled: !!API,
-    onSuccess: (data) => {
-      if (onIssueCountChange) {
-        onIssueCountChange(data.filter(i => i.state === 'open').length)
-      }
-    },
   })
+
+  useEffect(() => {
+    if (issues.length && onIssueCountChange) {
+      onIssueCountChange(issues.filter(i => i.state === 'open').length)
+    }
+  }, [issues])
 
   async function handleCloseIssue(num) {
     if (!confirm(`Close issue #${num}?`)) return

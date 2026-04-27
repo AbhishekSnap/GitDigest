@@ -3,6 +3,7 @@ import useStore from '../../store/useStore.js'
 import { useToast } from '../../context/ToastContext.jsx'
 
 const RULE_TYPES = [
+  { value: 'risk_high',     label: 'High-risk commit detected' },
   { value: 'new_commit',    label: 'Any new commit' },
   { value: 'new_pr',        label: 'Any new PR opened' },
   { value: 'pr_merged',     label: 'Any PR merged' },
@@ -29,7 +30,7 @@ export default function SettingsView() {
   const toast = useToast()
 
   const [keyInput, setKeyInput]   = useState('')
-  const [keySaved, setKeySaved]   = useState(!!sessionStorage.getItem('gd_anth_key'))
+  const [keySaved, setKeySaved]   = useState(!!sessionStorage.getItem('gcrmcp_api_key'))
   const [newType, setNewType]     = useState('new_commit')
   const [newParam, setNewParam]   = useState('')
 
@@ -42,14 +43,14 @@ export default function SettingsView() {
   function saveKey() {
     const k = keyInput.trim()
     if (!k) { toast('⚠️', 'Empty key', 'Paste your Anthropic API key first'); return }
-    sessionStorage.setItem('gd_anth_key', k)
+    sessionStorage.setItem('gcrmcp_api_key', k)
     setKeySaved(true)
     setKeyInput('')
     toast('✅', 'API key saved', 'Key stored for this session')
   }
 
   function removeKey() {
-    sessionStorage.removeItem('gd_anth_key')
+    sessionStorage.removeItem('gcrmcp_api_key')
     setKeySaved(false)
     toast('🗑️', 'API key removed', '')
   }

@@ -1,5 +1,5 @@
 import { CLAUDE, MODEL, getKey, detectType } from '../utils/index.js'
-import { fetchCommitDetail, fetchPRFiles, fetchPRReviews, fetchBranchCommits } from './github.js'
+import { fetchCommitDetail, fetchPRFiles, fetchPRReviews, fetchBranchCommits, ghFetch } from './github.js'
 import useStore from '../store/useStore.js'
 
 async function claudeCall(key, system, userMsg, maxTokens = 1500) {
@@ -74,13 +74,13 @@ export async function reviewPRDiff(API, num) {
   if (!key) throw new Error('no-key')
 
   const files = prFilesCache.get(num) || await fetchPRFiles(API, num)
-  const diffText = files.slice(0, 10).map(f =>
-    `=== ${f.filename} (+${f.additions} -${f.deletions}) ===\n${(f.patch || '').slice(0, 500)}`
-  ).join('\n\n').slice(0, 5000)
+  const patches = files.slice(0, 10).map(f =>
+    `File: ${f.filename} (+${f.additions} -${f.deletions})\n${(f.patch || '').slice(0, 500)}`
+  ).join('\n\n---\n\n').slice(0, 4000)
 
-  const prompt = `Review this pull request diff and provide actionable feedback.\n\nDiff:\n${diffText}\n\nReturn a JSON object with:\n  "overview": 2-3 sentence overall assessment\n  "issues": array of objects with "severity" (high|medium|low), "file", "description"\n  "suggestions": array of improvement suggestion strings\n  "verdict": one of: "Approve" | "Request Changes" | "Needs Discussion"\nIMPORTANT: No em dashes, no markdown fences, plain JSON only.`
+  const prompt = `Review this PR diff and identify specific code concerns.\n\nDiff:\n${patches}\n\nReturn JSON with:\n"issues": array of up to 7 objects, each: {"severity":"critical"|"warning"|"info","file":"filename","description":"1-2 sentences naming exact code construct or pattern"}\n"summary": 1-2 sentence overall verdict\nRules: No em dashes, no markdown. Return ONLY valid JSON.`
 
-  const raw    = await claudeCall(key, null, prompt, 2000)
+  const raw    = await claudeCall(key, null, prompt, 900)
   const review = JSON.parse(raw)
   setPRReviewAI(num, review)
   return review
@@ -97,19 +97,20 @@ export async function scorePRRisk(API, num) {
   const files = prFilesCache.get(num) || await fetchPRFiles(API, num)
   const fileList = files.map(f => `${f.filename}: +${f.additions} -${f.deletions}`).join('\n')
 
-  const prompt = `Score the deployment risk of a pull request based on these files changed:\n${fileList}\n\nReturn JSON with:\n  "score": number 1-10 (10 = highest risk)\n  "level": "Low" | "Medium" | "High"\n  "factors": array of risk factor strings (max 5)\n  "recommendation": one sentence action recommendation\nPlain JSON only, no markdown.`
+  const hasTests = files.some(f => /test|spec|__tests__/i.test(f.filename))
+  const prompt = `Score this pull request's deployment risk across 4 dimensions.\nFiles changed: ${files.length}, Has test files: ${hasTests}\nFile list:\n${fileList}\n\nReturn JSON with:\n"overall": 1-10 (1=very low risk, 10=very high risk)\n"test_coverage": 1-10 (1=well tested, 10=no tests)\n"breaking_changes": 1-10 (1=no breaking changes, 10=high risk)\n"security_risk": 1-10 (1=no concerns, 10=high security risk)\n"deployment_impact": 1-10 (1=minimal impact, 10=high impact)\n"rationale": 1-2 sentence explanation\nReturn ONLY valid JSON.`
 
-  const raw  = await claudeCall(key, null, prompt, 500)
+  const raw  = await claudeCall(key, null, prompt, 350)
   const risk = JSON.parse(raw)
   setPRRisk(num, risk)
   return risk
 }
 
 // ── Report generation ─────────────────────────────────────────────────────────
-export async function generateReport(payload) {
+export async function generateReport(promptStr) {
   const key = getKey()
   if (!key) throw new Error('no-key')
-  const raw = await claudeCall(key, null, payload, 5500)
+  const raw = await claudeCall(key, null, promptStr, 5500)
   return JSON.parse(raw)
 }
 
@@ -205,17 +206,76 @@ export async function draftPRDescription(API, head, base) {
   return data.content[0].text.trim()
 }
 
-// ── Stale branch / item analysis ──────────────────────────────────────────────
-export async function analyzeStaleItems(branchData, repoName) {
+// ── Stale branch / AI branch analysis (matches original index.html exactly) ────
+export async function analyzeStaleItems(branchData, prs, commits, defaultBranch, repoFullName) {
   const key = getKey()
   if (!key) throw new Error('no-key')
 
   const branchSummary = branchData.slice(0, 20).map(b =>
-    `${b.name}: last commit ${b.commit?.commit?.author?.date?.slice(0,10) || 'unknown'}`
+    `${b.name}: ${b.ageDays || 0}d old, ${b.ahead} ahead, ${b.behind} behind${b.pr ? ' (has PR)' : ''}${!b.isDefault && (b.ageDays || 0) > 60 ? ' [STALE]' : ''}`
   ).join('\n')
 
-  const prompt = `Analyze these branches for a repository (${repoName}) and identify:\n1. Stale branches that should be cleaned up\n2. Active development branches\n3. Potential merge conflicts\n\nBranches:\n${branchSummary}\n\nReturn JSON with:\n  "stale": array of {name, reason} for branches to consider deleting\n  "active": array of branch names that look active\n  "summary": 2-3 sentence overview\nPlain JSON only.`
+  const prSummary = prs.map(p =>
+    `#${p.number} "${p.title}" by ${p.user?.login || ''} — ${p.state} — opened ${Math.floor((Date.now() - new Date(p.created_at)) / 86400000)}d ago${p.merged_at ? ' merged' : ''}`
+  ).join('\n')
+
+  const typeBreakdown = {}
+  commits.forEach(c => { const t = detectType(c.commit.message); typeBreakdown[t] = (typeBreakdown[t] || 0) + 1 })
+
+  const longRunning = prs.filter(p => p.state === 'open' && (Date.now() - new Date(p.created_at)) > 14 * 86400000).length
+
+  const prompt = `Analyse this repository's branch health and development patterns.\n\nRepo: ${repoFullName}\nDefault branch: ${defaultBranch}\nTotal branches: ${branchData.length}\nStale branches (30d+): ${branchData.filter(b => !b.isDefault && (b.ageDays || 0) > 30).length}\nLong-running open PRs (14d+): ${longRunning}\n\nBranches:\n${branchSummary || 'None'}\n\nAll PRs:\n${prSummary || 'None'}\n\nCommit type mix: ${Object.entries(typeBreakdown).map(([t, n]) => `${t}:${n}`).join(', ')}\n\nReturn JSON with:\n"stale_branches": array of objects {"name":"branch name","concern":"1 sentence","severity":"high"|"med"|"low"}\n"long_prs": array of objects {"number":N,"title":"short title","concern":"1 sentence","severity":"high"|"med"|"low"}\n"activity_insights": array of 2-3 strings about patterns or risks\n"recommendations": array of 3 actionable strings for the team\nOnly flag actual problems. Return ONLY valid JSON.`
 
   const raw = await claudeCall(key, null, prompt, 800)
+  return JSON.parse(raw)
+}
+
+// ── Project Overview / Onboarding (matches original index.html exactly) ────────
+export async function generateProjectOverview(API, currentRepo, onProgress) {
+  const key = getKey()
+  if (!key) throw new Error('no-key')
+
+  // Fetch ALL commits (all pages)
+  let allCommits = [], page = 1, hasMore = true
+  while (hasMore) {
+    onProgress?.(`Fetching commits (${allCommits.length} so far)…`)
+    const batch = await ghFetch(`${API}/commits?per_page=100&page=${page}`)
+    allCommits = allCommits.concat(batch)
+    hasMore = batch.length === 100
+    page++
+  }
+
+  // Fetch ALL PRs
+  let allPRs = [], prPage = 1, prMore = true
+  while (prMore) {
+    const batch = await ghFetch(`${API}/pulls?state=all&per_page=100&page=${prPage}`)
+    allPRs = allPRs.concat(batch)
+    prMore = batch.length === 100
+    prPage++
+  }
+
+  onProgress?.('Analysing with Claude…')
+
+  const typeBreakdown = {}
+  allCommits.forEach(c => { const t = detectType(c.commit.message); typeBreakdown[t] = (typeBreakdown[t] || 0) + 1 })
+  const authors = [...new Set(allCommits.map(c => c.commit.author.name))].join(', ')
+
+  const chronoAll = [...allCommits].reverse()
+  const fullCommitLog = chronoAll.map(c =>
+    `${c.commit.author.date.slice(0, 10)} | ${c.commit.author.name} | ${detectType(c.commit.message)} | ${c.commit.message.split('\n')[0].slice(0, 90)}`
+  ).join('\n')
+
+  const prLog = allPRs.map(p =>
+    `${p.created_at.slice(0, 10)} | ${p.user?.login || ''} | PR #${p.number} | ${p.title} | ${p.merged_at ? 'merged' : p.state}`
+  ).join('\n')
+
+  const { commitDetailCache, prFilesCache } = useStore.getState()
+  const filesSeen = new Set()
+  commitDetailCache.forEach(d => (d.files || []).forEach(f => filesSeen.add(f.filename)))
+  prFilesCache.forEach(files => files.forEach(f => filesSeen.add(f.filename)))
+
+  const prompt = `Generate a structured project overview for onboarding a new developer. You have the FULL commit and PR history.\n\nRepo: ${currentRepo?.full_name}\nLanguage: ${currentRepo?.language || 'Unknown'}\nDescription: ${currentRepo?.description || 'None'}\nTotal commits: ${allCommits.length}\nTotal PRs: ${allPRs.length}\nContributors: ${authors}\nCommit types: ${Object.entries(typeBreakdown).map(([t, n]) => `${t}:${n}`).join(', ')}\n\nFULL COMMIT HISTORY (oldest first): DATE | AUTHOR | TYPE | MESSAGE\n${fullCommitLog || 'None'}\n\nFULL PR HISTORY (newest first): DATE | AUTHOR | PR# | TITLE | STATUS\n${prLog || 'None'}\n\nFiles seen in diffs: ${[...filesSeen].slice(0, 40).join(', ') || 'None'}\n\nReturn JSON with:\n"project_type": 2-3 sentences on what this project is, its purpose, and who uses it. Be specific based on the commit and PR history.\n"tech_stack": array of strings (technologies/frameworks detected from files and commit messages)\n"key_modules": array of strings (main functional areas inferred from file paths and history)\n"team_structure": 2-3 sentences on team size, contribution patterns, key contributors and their focus areas\n"evolution": 2-3 sentences describing how the project evolved from its earliest commits to now — what was built first, what came later\n"recent_focus": array of 4-5 strings describing what the team has been working on in the most recent commits/PRs\n"onboarding_tips": array of 4-5 actionable strings for a new developer joining this project\n"health_snapshot": 2-3 sentences on codebase health — commit frequency, PR merge rate, activity trends\nReturn ONLY valid JSON. No em dashes.`
+
+  const raw = await claudeCall(key, null, prompt, 1500)
   return JSON.parse(raw)
 }

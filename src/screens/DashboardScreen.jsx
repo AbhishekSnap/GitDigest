@@ -45,7 +45,7 @@ export default function DashboardScreen() {
   function evaluateAlertRules() {
     const { commitAnalysisCache } = useStore.getState()
     alertRules.filter(r => r.enabled).forEach(rule => {
-      if (rule.metric === 'risk_high') {
+      if (rule.type === 'risk_high') {
         const shas = [...commitAnalysisCache.entries()]
           .filter(([, a]) => a?.risk_level?.startsWith('High'))
           .map(([sha]) => sha.slice(0, 7))
@@ -82,6 +82,8 @@ export default function DashboardScreen() {
 
   return (
     <>
+      <div className="blob blob-1"></div>
+      <div className="blob blob-2"></div>
       <Sidebar openIssuesCount={openIssuesCount} alertUnread={alertUnread} />
       <Topbar
         onRefresh={handleRefresh}

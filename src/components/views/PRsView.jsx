@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useInfiniteQuery } from '@tanstack/react-query'
 import useStore from '../../store/useStore.js'
 import { useToast } from '../../context/ToastContext.jsx'
@@ -210,6 +210,24 @@ function PRCard({ pr: p, isExpanded, analysis, files, reviews, comments, reviewC
   )
 }
 
+function ThinkingDots({ messages }) {
+  const [idx, setIdx] = useState(0)
+  useEffect(() => {
+    const iv = setInterval(() => setIdx(i => (i + 1) % messages.length), 1800)
+    return () => clearInterval(iv)
+  }, [messages.length])
+  return (
+    <div className="ai-thinking" style={{ marginBottom: 10 }}>
+      <div className="ai-thinking-msg">{messages[idx]}</div>
+      <div className="ai-dots">
+        <div className="ai-dot"></div>
+        <div className="ai-dot"></div>
+        <div className="ai-dot"></div>
+      </div>
+    </div>
+  )
+}
+
 function ExpandedPR({ pr: p, analysis, files, reviews, comments, reviewComments, aiReview, riskData, currentRepo, API, onMerge, onClose, onCopyLink }) {
   const toast = useToast()
   const [showDiff, setShowDiff]         = useState(false)
@@ -243,22 +261,24 @@ function ExpandedPR({ pr: p, analysis, files, reviews, comments, reviewComments,
   async function handleAIReview() {
     if (aiReview) { setShowAIReview(s => !s); return }
     setAIReviewLoading(true)
+    setShowAIReview(true)
     try {
       await reviewPRDiff(API, num)
-      setShowAIReview(true)
     } catch (e) {
       toast('❌', 'AI Review failed', e.message)
+      setShowAIReview(false)
     } finally { setAIReviewLoading(false) }
   }
 
   async function handleRiskScore() {
     if (riskData) { setShowRisk(s => !s); return }
     setRiskLoading(true)
+    setShowRisk(true)
     try {
       await scorePRRisk(API, num)
-      setShowRisk(true)
     } catch (e) {
       toast('❌', 'Risk scoring failed', e.message)
+      setShowRisk(false)
     } finally { setRiskLoading(false) }
   }
 
@@ -270,7 +290,7 @@ function ExpandedPR({ pr: p, analysis, files, reviews, comments, reviewComments,
       toast('✅', 'Review submitted', label + ` on PR #${num}`)
       setReviewStatus('')
       setReviewBody('')
-      useStore.getState().setPRReviews(num, null) // invalidate
+      useStore.getState().setPRReviews(num, null)
     } catch (e) { setReviewStatus('Failed: ' + e.message) }
   }
 
@@ -278,6 +298,14 @@ function ExpandedPR({ pr: p, analysis, files, reviews, comments, reviewComments,
     ...comments.map(c => ({ ...c, _type: 'comment' })),
     ...reviewComments.map(c => ({ ...c, _type: 'review' })),
   ].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+
+  const riskColor = v => v <= 3 ? 'var(--teal)' : v <= 6 ? 'var(--amber)' : 'var(--red)'
+  const riskDims  = riskData ? [
+    { name: 'Test Coverage',    val: riskData.test_coverage    || 5 },
+    { name: 'Breaking Changes', val: riskData.breaking_changes || 5 },
+    { name: 'Security Risk',    val: riskData.security_risk    || 5 },
+    { name: 'Deploy Impact',    val: riskData.deployment_impact || 5 },
+  ] : []
 
   return (
     <div className="pr-body">
@@ -345,7 +373,7 @@ function ExpandedPR({ pr: p, analysis, files, reviews, comments, reviewComments,
                 style={{ fontSize: 11, padding: '4px 10px', color: 'var(--gold)', borderColor: 'rgba(201,168,76,.3)' }}
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="12" height="12"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
-                {aiReviewLoading ? 'Loading…' : aiReview ? (showAIReview ? 'Hide Review' : 'AI Review') : 'AI Review'}
+                {aiReviewLoading ? 'Reviewing…' : aiReview ? (showAIReview ? 'Hide Review' : 'AI Review') : 'AI Review'}
               </button>
               <button
                 className="abtn"
@@ -354,7 +382,7 @@ function ExpandedPR({ pr: p, analysis, files, reviews, comments, reviewComments,
                 style={{ fontSize: 11, padding: '4px 10px' }}
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="12" height="12"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-                {riskLoading ? 'Loading…' : riskData ? (showRisk ? 'Hide Risk' : 'Risk Score') : 'Risk Score'}
+                {riskLoading ? 'Scoring…' : riskData ? (showRisk ? 'Hide Risk' : 'Risk Score') : 'Risk Score'}
               </button>
               <button
                 className="abtn"
@@ -368,44 +396,70 @@ function ExpandedPR({ pr: p, analysis, files, reviews, comments, reviewComments,
           </div>
 
           {/* Risk meter */}
-          {showRisk && riskData && (
-            <div className="risk-meter-wrap" style={{ marginBottom: 10 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
-                <div className="risk-meter-bar">
-                  <div className="risk-meter-fill" style={{ width: `${(riskData.score / 10) * 100}%`, background: riskData.score >= 7 ? 'var(--red)' : riskData.score >= 4 ? 'var(--amber)' : 'var(--teal)' }}></div>
+          {showRisk && (
+            riskLoading
+              ? <ThinkingDots messages={['Analysing changed files…', 'Checking for tests…', 'Scoring risk dimensions…', 'Calculating impact…']} />
+              : riskData && (
+                <div className="risk-meter-wrap" style={{ marginBottom: 10 }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 10 }}>
+                    <div>
+                      <div className="risk-meter-label">Overall Risk Score</div>
+                      <div className="risk-meter-score" style={{ color: riskColor(riskData.overall || 5) }}>
+                        {riskData.overall || 5}<span style={{ fontSize: 14, color: 'var(--text3)' }}>/10</span>
+                      </div>
+                    </div>
+                    <button onClick={() => setShowRisk(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 14, lineHeight: 1 }}>✕</button>
+                  </div>
+                  <div>
+                    {riskDims.map(d => (
+                      <div key={d.name} className="risk-dim">
+                        <span className="risk-dim-name">{d.name}</span>
+                        <div className="risk-dim-track"><div className="risk-dim-bar" style={{ width: `${d.val * 10}%`, background: riskColor(d.val) }}></div></div>
+                        <span className="risk-dim-val" style={{ color: riskColor(d.val) }}>{d.val}</span>
+                      </div>
+                    ))}
+                  </div>
+                  {riskData.rationale && (
+                    <div style={{ fontSize: 11, color: 'var(--text3)', lineHeight: 1.5, marginTop: 8, borderTop: '1px solid var(--border)', paddingTop: 8 }}>{riskData.rationale}</div>
+                  )}
                 </div>
-                <span style={{ fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 700, color: riskData.score >= 7 ? 'var(--red)' : riskData.score >= 4 ? 'var(--amber)' : 'var(--teal)' }}>
-                  {riskData.score}/10 — {riskData.level}
-                </span>
-              </div>
-              {riskData.factors?.length > 0 && (
-                <div style={{ fontSize: 12, color: 'var(--text2)' }}>
-                  {riskData.factors.map((f, i) => <div key={i}>· {f}</div>)}
-                </div>
-              )}
-              {riskData.recommendation && (
-                <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 6, fontStyle: 'italic' }}>{riskData.recommendation}</div>
-              )}
-            </div>
+              )
           )}
 
           {/* AI Review */}
-          {showAIReview && aiReview && (
-            <div style={{ background: 'var(--s3)', border: '1px solid var(--border)', borderRadius: 8, padding: 14, marginBottom: 10 }}>
-              <div className="albl" style={{ marginBottom: 8 }}>AI Code Review — {aiReview.verdict}</div>
-              <div style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 10 }}>{aiReview.overview}</div>
-              {aiReview.issues?.length > 0 && (
-                <div style={{ marginBottom: 8 }}>
-                  {aiReview.issues.map((issue, i) => (
-                    <div key={i} style={{ fontSize: 12, padding: '4px 0', borderBottom: '1px solid var(--border)' }}>
-                      <span style={{ color: issue.severity === 'high' ? 'var(--red)' : issue.severity === 'medium' ? 'var(--amber)' : 'var(--text3)', fontWeight: 600, textTransform: 'uppercase', fontSize: 10 }}>{issue.severity}</span>
-                      {' '}<span style={{ fontFamily: 'var(--mono)', color: 'var(--blue)', fontSize: 11 }}>{issue.file}</span>
-                      {' — '}{issue.description}
-                    </div>
-                  ))}
+          {showAIReview && (
+            aiReviewLoading
+              ? <ThinkingDots messages={['Reading the diff…', 'Scanning changed files…', 'Identifying concerns…', 'Finalising review…']} />
+              : aiReview && (
+                <div className="ai-review-wrap" style={{ marginBottom: 10 }}>
+                  <div className="ai-review-hdr">
+                    <span className="ai-review-hdr-title">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="13" height="13"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+                      AI Code Review
+                      {(() => {
+                        const count = aiReview.issues?.length || 0
+                        return <span style={{ background: count > 0 ? 'var(--red-dim)' : 'var(--teal-dim)', color: count > 0 ? 'var(--red)' : 'var(--teal)', fontSize: 10, padding: '1px 8px', borderRadius: 10 }}>{count > 0 ? count + ' issue' + (count > 1 ? 's' : '') : 'Looks good'}</span>
+                      })()}
+                    </span>
+                    <button onClick={() => setShowAIReview(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 14, lineHeight: 1, padding: 2 }}>✕</button>
+                  </div>
+                  <div className="ai-review-body">
+                    {aiReview.summary && (
+                      <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 6, lineHeight: 1.5, padding: '8px 10px', background: 'var(--s2)', borderRadius: 6 }}>{aiReview.summary}</div>
+                    )}
+                    {(aiReview.issues?.length || 0) === 0
+                      ? <div style={{ fontSize: 12, color: 'var(--teal)' }}>No significant issues found. Code looks clean.</div>
+                      : (aiReview.issues || []).map((issue, i) => (
+                          <div key={i} className={`ar-item ar-${issue.severity || 'info'}`}>
+                            <div className="ar-sev">{issue.severity || 'info'}</div>
+                            {issue.file && <div className="ar-file">{issue.file}</div>}
+                            <div className="ar-desc">{issue.description}</div>
+                          </div>
+                        ))
+                    }
+                  </div>
                 </div>
-              )}
-            </div>
+              )
           )}
 
           {/* Diff view */}

@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo } from 'react'
 import useStore from '../../store/useStore.js'
+import { useToast } from '../../context/ToastContext.jsx'
 import { fetchAllCommits, fetchAllPRs } from '../../api/github.js'
+import { generateProjectOverview } from '../../api/anthropic.js'
 import { detectType, timeAgo, dayKey, avatarColor, avatarInitial, COLORS, TYPE_COLORS, esc } from '../../utils/index.js'
 
 function insEmpty(msg) {
@@ -151,14 +153,151 @@ function renderPRMergeTrend(prs) {
   </svg>`
 }
 
+// ── Project Overview Modal ────────────────────────────────────────────────────
+function OverviewModal({ onClose }) {
+  const { API, currentRepo } = useStore()
+  const toast = useToast()
+  const [result, setResult]     = useState(null)
+  const [loading, setLoading]   = useState(true)
+  const [progress, setProgress] = useState('Fetching commit history…')
+  const [overviewCache, setOverviewCache] = useState(null)
+
+  useEffect(() => {
+    generate()
+  }, [])
+
+  async function generate() {
+    setLoading(true)
+    try {
+      const data = await generateProjectOverview(API, currentRepo, msg => setProgress(msg))
+      setResult(data)
+    } catch (e) {
+      if (e.message === 'no-key') {
+        useStore.getState().switchView('settings')
+        toast('🔑', 'API Key Required', 'Add your Anthropic API key in Settings')
+        onClose()
+      } else {
+        toast('❌', 'Overview failed', e.message)
+        onClose()
+      }
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div id="onboarding-modal" className="open" onClick={e => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="ob-inner">
+        <button className="ob-close" onClick={onClose}>✕</button>
+        <div id="onboarding-content">
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: '40px 0' }}>
+              <div className="ai-thinking">
+                <div className="ai-thinking-msg">{progress}</div>
+                <div className="ai-dots">
+                  <div className="ai-dot"></div>
+                  <div className="ai-dot"></div>
+                  <div className="ai-dot"></div>
+                </div>
+              </div>
+            </div>
+          ) : result ? (
+            <>
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20, gap: 12 }}>
+                <div>
+                  <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>{currentRepo?.name || 'Project Overview'}</div>
+                  <div style={{ fontSize: 12, color: 'var(--text3)' }}>{currentRepo?.full_name || ''}</div>
+                </div>
+                {currentRepo?.language && (
+                  <span style={{ fontFamily: 'var(--mono)', fontSize: 11, padding: '4px 10px', borderRadius: 'var(--r-pill)', background: 'var(--s3)', color: 'var(--text3)', whiteSpace: 'nowrap' }}>{currentRepo.language}</span>
+                )}
+              </div>
+
+              {result.project_type && (
+                <div className="ob-section">
+                  <div className="ob-section-label">What is this project?</div>
+                  <div style={{ fontSize: 13, color: 'var(--text2)', lineHeight: 1.65 }}>{result.project_type}</div>
+                </div>
+              )}
+
+              {result.tech_stack?.length > 0 && (
+                <div className="ob-section">
+                  <div className="ob-section-label">Tech Stack</div>
+                  <div>{result.tech_stack.map(t => <span key={t} className="ob-tag">{t}</span>)}</div>
+                </div>
+              )}
+
+              {result.key_modules?.length > 0 && (
+                <div className="ob-section">
+                  <div className="ob-section-label">Key Areas</div>
+                  <div>{result.key_modules.map(m => <span key={m} className="ob-tag">{m}</span>)}</div>
+                </div>
+              )}
+
+              {result.evolution && (
+                <div className="ob-section">
+                  <div className="ob-section-label">How it evolved</div>
+                  <div style={{ fontSize: 13, color: 'var(--text2)', lineHeight: 1.65 }}>{result.evolution}</div>
+                </div>
+              )}
+
+              {result.team_structure && (
+                <div className="ob-section">
+                  <div className="ob-section-label">Team</div>
+                  <div style={{ fontSize: 13, color: 'var(--text2)', lineHeight: 1.65 }}>{result.team_structure}</div>
+                </div>
+              )}
+
+              {result.recent_focus?.length > 0 && (
+                <div className="ob-section">
+                  <div className="ob-section-label">Recent Focus</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                    {result.recent_focus.map((f, i) => (
+                      <div key={i} style={{ display: 'flex', gap: 8, fontSize: 12, color: 'var(--text2)', alignItems: 'flex-start' }}>
+                        <span style={{ color: 'var(--gold)', flexShrink: 0, marginTop: 2 }}>◆</span>{f}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {result.onboarding_tips?.length > 0 && (
+                <div className="ob-section">
+                  <div className="ob-section-label">Onboarding Tips</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {result.onboarding_tips.map((t, i) => (
+                      <div key={i} style={{ display: 'flex', gap: 10, fontSize: 12, color: 'var(--text2)', padding: '10px 12px', background: 'var(--s2)', borderRadius: 8 }}>
+                        <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--teal)', flexShrink: 0, marginTop: 1 }}>{i + 1}.</span>{t}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {result.health_snapshot && (
+                <div style={{ background: 'var(--s2)', border: '1px solid var(--border)', borderRadius: 8, padding: 14 }}>
+                  <div className="ob-section-label" style={{ marginBottom: 8 }}>Codebase Health</div>
+                  <div style={{ fontSize: 13, color: 'var(--text2)', lineHeight: 1.65 }}>{result.health_snapshot}</div>
+                </div>
+              )}
+            </>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function InsightsView() {
   const { API, commitDetailCache, currentRepo } = useStore()
+  const toast = useToast()
   const [insCommits, setInsCommits] = useState(null)
   const [insPRs, setInsPRs]         = useState(null)
   const [loading, setLoading]       = useState(false)
   const [days, setDays]             = useState(0)
   const [author, setAuthor]         = useState('')
   const [contribSort, setContribSort] = useState({ key: 'commits', dir: -1 })
+  const [showOverview, setShowOverview] = useState(false)
 
   useEffect(() => {
     if (!API || insCommits !== null) return
@@ -259,6 +398,8 @@ export default function InsightsView() {
 
   return (
     <div className="view active" id="view-insights">
+      {showOverview && <OverviewModal onClose={() => setShowOverview(false)} />}
+
       {/* Filters */}
       <div className="ins-filters">
         <div style={{ display: 'flex', gap: 6 }}>
@@ -271,6 +412,14 @@ export default function InsightsView() {
             <option value="">All contributors</option>
             {authors.map(a => <option key={a} value={a}>{a}</option>)}
           </select>
+          <button
+            className="btn"
+            onClick={() => setShowOverview(true)}
+            style={{ fontSize: 12, color: 'var(--gold)', borderColor: 'rgba(201,168,76,.3)' }}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="13" height="13"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+            Project Overview
+          </button>
         </div>
       </div>
 

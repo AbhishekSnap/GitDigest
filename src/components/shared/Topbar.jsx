@@ -15,7 +15,7 @@ const VIEW_META = {
 }
 
 export default function Topbar({ onRefresh, refreshing, onOpenReport, onOpenAsk, commits, prs }) {
-  const { currentView, currentRepo, toggleTheme, isLight, alertUnread } = useStore()
+  const { currentView, currentRepo, toggleTheme, isLight, alertUnread, backToRepos } = useStore()
   const toast = useToast()
   const meta  = VIEW_META[currentView] || { title: currentView, badge: '' }
 
@@ -60,6 +60,10 @@ export default function Topbar({ onRefresh, refreshing, onOpenReport, onOpenAsk,
   return (
     <header className="topbar">
       <div className="topbar-left">
+        <button className="btn" onClick={backToRepos} style={{ color: 'var(--text3)' }}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" width="12" height="12"><polyline points="15 18 9 12 15 6"/></svg>
+          Repos
+        </button>
         <span className="topbar-title" id="topbar-title">{meta.title}</span>
         {meta.badge && <span className="topbar-badge" id="topbar-badge">{meta.badge}</span>}
       </div>

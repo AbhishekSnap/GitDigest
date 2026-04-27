@@ -14,7 +14,7 @@ import {
 export default function CommitsView() {
   const {
     API, currentBranch, setCurrentBranch,
-    commitAnalysisCache, commitDetailCache, settings,
+    commitAnalysisCache, commitDetailCache, settings, currentRepo,
   } = useStore()
   const toast = useToast()
 
@@ -48,6 +48,41 @@ export default function CommitsView() {
   })
 
   const commits = data?.pages.flat() ?? []
+
+  useEffect(() => {
+    function exportCSV() {
+      const { commitAnalysisCache: cache, commitDetailCache: dCache } = useStore.getState()
+      const rows = [['SHA', 'Message', 'Author', 'Date', 'Change Type', 'Quality', 'Risk Level', 'Files', 'Additions', 'Deletions']]
+      commits.forEach(c => {
+        const a = cache.get(c.sha)
+        const d = dCache.get(c.sha)
+        rows.push([
+          c.sha.slice(0, 7),
+          `"${(c.commit.message.split('\n')[0] || '').replace(/"/g, '""')}"`,
+          c.commit.author.name,
+          c.commit.author.date,
+          a?.change_type || detectType(c.commit.message),
+          `"${(a?.quality || '').replace(/"/g, '""')}"`,
+          a?.risk_level || '',
+          d?.files?.length || '',
+          d?.stats?.additions || '',
+          d?.stats?.deletions || '',
+        ])
+      })
+      if (!commits.length) { toast('⚠️', 'No data', 'Load commits first'); return }
+      const csv = rows.map(r => r.join(',')).join('\n')
+      const blob = new Blob([csv], { type: 'text/csv' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `commit-log-${new Date().toISOString().slice(0, 10)}.csv`
+      a.click()
+      URL.revokeObjectURL(url)
+      toast('⬇️', 'Export ready', `${commits.length} commits exported`)
+    }
+    window.addEventListener('gd:exportCSV', exportCSV)
+    return () => window.removeEventListener('gd:exportCSV', exportCSV)
+  }, [commits, toast])
 
   function getDisplayType(commit) {
     const cached = commitAnalysisCache.get(commit.sha)
@@ -89,23 +124,34 @@ export default function CommitsView() {
     return r
   }, [commitAnalysisCache.size])
 
-  // Heatmap: commits per day-of-week this month
+  // Heatmap: proper calendar grid, Monday-first, teal color, actual dates
   const heatmapData = useMemo(() => {
     const now = new Date()
+    const year = now.getFullYear()
     const month = now.getMonth()
-    const year  = now.getFullYear()
-    const grid  = Array(35).fill(0)
+    const daysInMonth = new Date(year, month + 1, 0).getDate()
+    const monthStart = new Date(year, month, 1)
+    const startOffset = (monthStart.getDay() + 6) % 7 // Monday=0
+    const monthShort = now.toLocaleDateString('en-GB', { month: 'short' })
+    const dayCounts = {}
     commits.forEach(c => {
       const d = new Date(c.commit.author.date)
       if (d.getMonth() === month && d.getFullYear() === year) {
-        const day = d.getDate() - 1
-        if (day < 35) grid[day]++
+        const key = `${year}-${String(month + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+        dayCounts[key] = (dayCounts[key] || 0) + 1
       }
     })
-    return grid
+    const maxC = Math.max(1, ...Object.values(dayCounts))
+    const cells = []
+    for (let i = 0; i < startOffset; i++) cells.push({ empty: true })
+    for (let d = 1; d <= daysInMonth; d++) {
+      const key = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+      const n = dayCounts[key] || 0
+      const intensity = n === 0 ? 0 : Math.min(1, 0.2 + n / maxC * 0.8)
+      cells.push({ empty: false, day: d, count: n, intensity, monthShort })
+    }
+    return cells
   }, [commits.length])
-
-  const maxHeat = Math.max(...heatmapData, 1)
 
   // Top contributors
   const contributors = useMemo(() => {
@@ -163,7 +209,6 @@ export default function CommitsView() {
 
   const TYPES = ['All', 'Feature', 'Bug Fix', 'Refactor', 'Chore', 'Docs', 'Tests', 'Performance', 'Security']
   const monthName = new Date().toLocaleString('default', { month: 'long', year: 'numeric' })
-  const DOW = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
 
   return (
     <div className="view active" id="view-commits">
@@ -211,10 +256,10 @@ export default function CommitsView() {
                 id="branch-select"
                 value={currentBranch}
                 onChange={e => setCurrentBranch(e.target.value)}
-                style={{ background: 'var(--s1)', border: '1px solid var(--border)', borderRadius: 'var(--r-btn)', padding: '10px 12px', color: 'var(--text)', fontFamily: 'var(--mono)', fontSize: 12, outline: 'none', cursor: 'pointer', width: 150, flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}
+                style={{ background: 'var(--s1)', border: '1px solid var(--border)', borderRadius: 'var(--r-btn)', padding: '7px 10px', color: 'var(--text)', fontFamily: 'var(--mono)', fontSize: 11, outline: 'none', cursor: 'pointer', width: 130, flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}
               >
-                <option value="">Default branch</option>
-                {branches.map(b => <option key={b.name} value={b.name}>{b.name}</option>)}
+                <option value="">{currentRepo?.default_branch || 'main'}</option>
+                {branches.filter(b => b.name !== (currentRepo?.default_branch || 'main')).map(b => <option key={b.name} value={b.name}>{b.name}</option>)}
               </select>
             )}
           </div>
@@ -248,6 +293,7 @@ export default function CommitsView() {
                       onToggle={toggleCommit}
                       onCopySHA={copySHA}
                       onBookmark={bookmark}
+                      onAuthorClick={name => setSearch(name)}
                     />
                   ))}
                 </div>
@@ -302,17 +348,17 @@ export default function CommitsView() {
           <div className="panel">
             <div className="panel-title">Activity — <span>{monthName}</span></div>
             <div className="heatmap-labels" id="hm-labels">
-              {DOW.map((d, i) => <div key={i} className="hm-lbl">{d}</div>)}
+              {['M','T','W','T','F','S','S'].map((d, i) => <div key={i} className="hm-lbl">{d}</div>)}
             </div>
             <div className="heatmap-grid" id="heatmap">
-              {heatmapData.map((count, i) => {
-                const alpha = count === 0 ? 0 : 0.1 + (count / maxHeat) * 0.9
+              {heatmapData.map((cell, i) => {
+                if (cell.empty) return <div key={i} className="hm-cell" style={{ opacity: 0 }}></div>
                 return (
                   <div
                     key={i}
                     className="hm-cell"
-                    data-tip={`${count} commit${count !== 1 ? 's' : ''}`}
-                    style={{ background: count === 0 ? undefined : `rgba(201,168,76,${alpha.toFixed(2)})` }}
+                    data-tip={`${cell.count} commit${cell.count !== 1 ? 's' : ''} on ${cell.day} ${cell.monthShort}`}
+                    style={{ background: cell.count === 0 ? undefined : `rgba(45,212,191,${cell.intensity.toFixed(2)})` }}
                   ></div>
                 )
               })}
@@ -328,7 +374,7 @@ export default function CommitsView() {
               {contributors.length === 0
                 ? <div style={{ fontSize: 12, color: 'var(--text3)' }}>No commits loaded yet</div>
                 : contributors.map(([name, count]) => (
-                  <div key={name} className="contrib-row">
+                  <div key={name} className="contrib-row" onClick={() => setSearch(name)} title={`Filter by ${name}`}>
                     <div className="av" style={{ background: avatarColor(name), width: 24, height: 24, fontSize: 10, flexShrink: 0 }}>{avatarInitial(name)}</div>
                     <div className="cname">{name}</div>
                     <div className="ccnt">{count}</div>
@@ -382,7 +428,7 @@ function RiskDonut({ counts, total }) {
   )
 }
 
-function CommitCard({ commit: c, isExpanded, analysis, detail, displayType, settings, commits, currentRepo, onToggle, onCopySHA, onBookmark }) {
+function CommitCard({ commit: c, isExpanded, analysis, detail, displayType, settings, commits, currentRepo, onToggle, onCopySHA, onBookmark, onAuthorClick }) {
   const sha   = c.sha
   const msg   = c.commit.message.split('\n')[0]
   const auth  = c.commit.author.name
@@ -391,6 +437,9 @@ function CommitCard({ commit: c, isExpanded, analysis, detail, displayType, sett
   const qdot  = analysis
     ? (analysis.quality?.startsWith('Good') ? 'good' : 'needs')
     : (isExpanded ? 'spin-dot' : '')
+  const qdotTitle = analysis
+    ? `Quality: ${analysis.quality?.split(':')[0]?.trim() || ''}`
+    : (isExpanded ? 'Analysing…' : undefined)
   const secWarn = settings.securityScan && detail && hasSecurityTouch(detail.files || [])
 
   return (
@@ -402,9 +451,9 @@ function CommitCard({ commit: c, isExpanded, analysis, detail, displayType, sett
           <span className={`tbadge ${typeCls(displayType)}`}>{displayType}</span>
           <span className="sha-pill">{sha.slice(0, 7)}</span>
           <div className="av" style={{ background: avatarColor(auth) }}>{avatarInitial(auth)}</div>
-          <span className="author-n">{auth}</span>
+          <span className="author-n" onClick={e => { e.stopPropagation(); onAuthorClick(auth) }}>{auth}</span>
           <span className="tago">{timeAgo(date)}</span>
-          <div className={`qdot ${qdot}`}></div>
+          <div className={`qdot ${qdot}`} data-tip={qdotTitle || undefined}></div>
         </div>
       </div>
       {isExpanded && (
@@ -423,20 +472,35 @@ function CommitCard({ commit: c, isExpanded, analysis, detail, displayType, sett
   )
 }
 
+function CommitThinking() {
+  const msgs = ['Fetching commit details…', 'Reading the diff…', 'Analysing with Claude…', 'Generating insights…']
+  const [idx, setIdx] = useState(0)
+  useEffect(() => {
+    const iv = setInterval(() => setIdx(i => (i + 1) % msgs.length), 1800)
+    return () => clearInterval(iv)
+  }, [])
+  return (
+    <div className="ai-thinking">
+      <div className="ai-thinking-msg">{msgs[idx]}</div>
+      <div className="ai-dots">
+        <div className="ai-dot"></div>
+        <div className="ai-dot"></div>
+        <div className="ai-dot"></div>
+      </div>
+    </div>
+  )
+}
+
 function ExpandedCommit({ sha, analysis, detail, commits, currentRepo, settings, onCopySHA, onBookmark }) {
   const files = detail?.files || []
 
-  if (!analysis && !detail) {
+  if (!analysis) {
     return (
       <div className="commit-body">
-        <div className="ag">
-          <div className="skeleton" style={{ height: 100 }}></div>
-          <div className="skeleton" style={{ height: 100 }}></div>
-        </div>
+        <CommitThinking />
       </div>
     )
   }
-  if (!analysis) return null
 
   const origMsg  = commits.find(c => c.sha === sha)?.commit.message.split('\n')[0] || ''
   const showSugg = settings.showSuggested && analysis.suggested_message && analysis.suggested_message !== origMsg
