@@ -3,6 +3,7 @@ import useStore from '../store/useStore.js'
 import { useToast } from '../context/ToastContext.jsx'
 import { fetchUser, fetchAllRepos } from '../api/github.js'
 import { cleanToken } from '../utils/index.js'
+import Logo from '../components/Logo.jsx'
 
 export default function LandingScreen() {
   const [pat, setPat]       = useState('')
@@ -34,6 +35,9 @@ export default function LandingScreen() {
       <div className="blob blob-1"></div>
       <div className="blob blob-2"></div>
       <div className="landing-card">
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
+          <Logo size={72} dark={true} />
+        </div>
         <div className="landing-logo">Git <span>Digest</span></div>
         <div className="landing-sub">AI-powered repository intelligence</div>
 

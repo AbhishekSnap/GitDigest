@@ -1,0 +1,20 @@
+<svg width="120" height="120" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="hexFill" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#D4AF37;stop-opacity:0.25" />
+      <stop offset="100%" style="stop-color:#4ECDC4;stop-opacity:0.12" />
+    </linearGradient>
+    <linearGradient id="goldPath" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#D4AF37;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#C5A028;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="tealPath" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#4ECDC4;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#3DB5AC;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <path d="M60 8.66 L94.64 30 L94.64 72.68 L60 94.02 L25.36 72.68 L25.36 30 Z" fill="url(#hexFill)" stroke="#D4AF37" stroke-width="1.8"/>
+  <path d="M38.57 38.57 Q47.14 51.43 60 51.43 T81.43 64.29" fill="none" stroke="url(#goldPath)" stroke-width="4.2" stroke-linecap="round"/>
+  <path d="M38.57 64.29 Q47.14 51.43 60 51.43 T81.43 38.57" fill="none" stroke="url(#tealPath)" stroke-width="4.2" stroke-linecap="round"/>
+  <circle cx="60" cy="51.43" r="4.8" fill="#FFFFFF"/>
+</svg>

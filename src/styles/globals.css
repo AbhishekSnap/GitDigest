@@ -47,10 +47,11 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 
 /* SIDEBAR */
 .sidebar{position:fixed;left:0;top:0;bottom:0;width:var(--sw);background:var(--s1);border-right:1px solid var(--border);display:flex;flex-direction:column;z-index:100;transition:background .3s}
-.sidebar-logo{padding:18px 16px 12px;border-bottom:1px solid var(--border)}
-.sidebar-logo h1{font-family:var(--sans);font-size:15px;font-weight:600;color:var(--text);letter-spacing:-.2px}
-.sidebar-logo h1 span{color:var(--gold)}
-.sidebar-logo p{font-family:var(--mono);font-size:10px;color:var(--text3);margin-top:3px;letter-spacing:.5px}
+.sidebar-logo{padding:6px 8px;border-bottom:1px solid var(--border)}
+.sidebar-brand{display:flex;align-items:center;gap:12px;padding:8px 12px;border-radius:6px;cursor:pointer;background:none;border:none;width:100%;text-align:left;transition:background .15s;-webkit-tap-highlight-color:transparent}
+.sidebar-brand:hover{background:rgba(212,175,55,0.08)}
+.sidebar-brand-name{font-family:var(--sans);font-size:15px;font-weight:500;color:var(--text);line-height:1;letter-spacing:-.1px}
+.sidebar-brand-name span{color:#D4AF37}
 .sidebar-nav{flex:1;padding:10px 8px;overflow-y:auto}
 .nav-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.2px;color:var(--text3);padding:0 8px;margin:12px 0 3px}
 .nav-label:first-child{margin-top:0}

@@ -30,8 +30,16 @@ export default function Sidebar({ openIssuesCount, alertUnread }) {
   return (
     <aside className="sidebar">
       <div className="sidebar-logo">
-        <h1>Git <span>Digest</span></h1>
-        <p>// commit intelligence</p>
+        <button className="sidebar-brand" onClick={() => switchView('commits')}>
+          <img
+            src="/filled_hex_helix.svg"
+            width="28"
+            height="28"
+            alt="Git Digest"
+            style={{ imageRendering: 'crisp-edges', flexShrink: 0 }}
+          />
+          <span className="sidebar-brand-name">Git <span>Digest</span></span>
+        </button>
       </div>
 
       <nav className="sidebar-nav">

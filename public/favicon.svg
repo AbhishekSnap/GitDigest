@@ -1,0 +1,31 @@
+<svg viewBox="14 5 92 92" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="fvHexFill" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#D4AF37;stop-opacity:0.30" />
+      <stop offset="100%" style="stop-color:#4ECDC4;stop-opacity:0.15" />
+    </linearGradient>
+    <linearGradient id="fvGold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#D4AF37;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#C5A028;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="fvTeal" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#4ECDC4;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#3DB5AC;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+
+  <!-- Hexagon -->
+  <path d="M60 8.66 L94.64 30 L94.64 72.68 L60 94.02 L25.36 72.68 L25.36 30 Z"
+    fill="url(#fvHexFill)" stroke="#D4AF37" stroke-width="2"/>
+
+  <!-- Gold helix path -->
+  <path d="M38.57 38.57 Q47.14 51.43 60 51.43 T81.43 64.29"
+    fill="none" stroke="url(#fvGold)" stroke-width="5" stroke-linecap="round"/>
+
+  <!-- Teal helix path -->
+  <path d="M38.57 64.29 Q47.14 51.43 60 51.43 T81.43 38.57"
+    fill="none" stroke="url(#fvTeal)" stroke-width="5" stroke-linecap="round"/>
+
+  <!-- Centre dot -->
+  <circle cx="60" cy="51.43" r="5.5" fill="#FFFFFF"/>
+</svg>
