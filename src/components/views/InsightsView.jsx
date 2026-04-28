@@ -316,7 +316,7 @@ function renderHODChart(commits) {
   const max = Math.max(1, ...counts)
   const peakH = counts.indexOf(max)
   const bars = counts.map((n, h) =>
-    `<div class="hod-bar${n === max ? ' peak' : ''}" style="height:${Math.max(4, Math.round(n / max * 100))}%" title="${h}:00 — ${n} commit${n !== 1 ? 's' : ''}"></div>`
+    `<div class="hod-bar${n === max ? ' peak' : ''}" style="height:${Math.max(4, Math.round(n / max * 100))}%" data-tip="${h}:00 — ${n} commit${n !== 1 ? 's' : ''}"></div>`
   ).join('')
   const labels = [0, 6, 12, 18, 23].map(h =>
     `<div style="font-size:8px;color:var(--text3);font-family:var(--mono);flex:${h === 0 ? 1 : h === 23 ? 1 : 5};text-align:${h === 0 ? 'left' : h === 23 ? 'right' : 'center'}">${h}:00</div>`
