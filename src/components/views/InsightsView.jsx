@@ -21,14 +21,15 @@ function InsEmpty({ msg }) {
 
 function chartColors(isLight) {
   return {
-    grid:       isLight ? 'rgba(0,0,0,0.06)'         : 'rgba(255,255,255,0.08)',
-    text:       isLight ? 'rgba(0,0,0,0.55)'          : 'rgba(255,255,255,0.55)',
-    tipBg:      isLight ? 'rgba(15,15,20,0.88)'       : 'rgba(255,255,255,0.95)',
-    tipText:    isLight ? '#ffffff'                    : '#0A0A0F',
-    gold:       isLight ? 'rgba(180,138,20,0.75)'     : 'rgba(212,175,55,0.75)',
-    goldBorder: isLight ? 'rgba(160,120,10,0.85)'     : 'rgba(212,175,55,0.9)',
-    teal:       isLight ? 'rgba(29,158,117,0.85)'     : 'rgba(78,205,196,0.85)',
-    tealBorder: isLight ? 'rgba(20,130,95,0.9)'       : 'rgba(78,205,196,1)',
+    grid:        isLight ? 'rgba(0,0,0,0.07)'          : 'rgba(255,255,255,0.06)',
+    text:        isLight ? '#9A9080'                    : '#444E5E',
+    tipBg:       isLight ? '#E6E1D9'                    : '#1A1F2A',
+    tipBorder:   isLight ? 'rgba(0,0,0,0.13)'          : 'rgba(255,255,255,0.11)',
+    tipText:     isLight ? '#1A1714'                    : '#EDE9E3',
+    gold:        isLight ? 'rgba(150,113,31,0.75)'     : 'rgba(201,168,76,0.75)',
+    goldBorder:  isLight ? 'rgba(130,95,20,0.85)'      : 'rgba(201,168,76,0.9)',
+    teal:        isLight ? 'rgba(13,122,112,0.85)'     : 'rgba(45,212,191,0.85)',
+    tealBorder:  isLight ? 'rgba(10,100,90,0.9)'       : 'rgba(45,212,191,1)',
   }
 }
 
@@ -43,8 +44,10 @@ function baseOptions(c, extraScales = {}) {
         backgroundColor: c.tipBg,
         titleColor: c.tipText,
         bodyColor: c.tipText,
-        padding: { x: 12, y: 8 },
-        cornerRadius: 6,
+        borderColor: c.tipBorder,
+        borderWidth: 1,
+        padding: { x: 10, y: 7 },
+        cornerRadius: 5,
         displayColors: false,
         titleFont: { size: 12, weight: 500 },
         bodyFont: { size: 11, weight: 400 },
