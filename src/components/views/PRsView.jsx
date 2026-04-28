@@ -243,14 +243,7 @@ function ExpandedPR({ pr: p, analysis, files, reviews, comments, reviewComments,
   if (!analysis) {
     return (
       <div className="pr-body">
-        {files.length === 0 ? (
-          <div className="ag">
-            <div className="skeleton" style={{ height: 90 }}></div>
-            <div className="skeleton" style={{ height: 90 }}></div>
-          </div>
-        ) : (
-          <ThinkingDots messages={['Reading PR files…', 'Analysing with Claude…', 'Reviewing sentiment…', 'Generating insights…']} />
-        )}
+        <ThinkingDots messages={['Fetching PR data…', 'Reading the diff…', 'Analysing with Claude…', 'Reviewing sentiment…']} />
       </div>
     )
   }
