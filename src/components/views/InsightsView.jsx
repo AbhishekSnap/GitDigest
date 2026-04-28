@@ -1,9 +1,12 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
+import { Chart, BarElement, BarController, CategoryScale, LinearScale, Tooltip, LineController, LineElement, PointElement } from 'chart.js'
 import useStore from '../../store/useStore.js'
 import { useToast } from '../../context/ToastContext.jsx'
 import { fetchAllCommits, fetchAllPRs } from '../../api/github.js'
 import { generateProjectOverview } from '../../api/anthropic.js'
 import { detectType, timeAgo, avatarColor, avatarInitial, COLORS, TYPE_COLORS, esc } from '../../utils/index.js'
+
+Chart.register(BarElement, BarController, CategoryScale, LinearScale, Tooltip, LineController, LineElement, PointElement)
 
 function InsEmpty({ msg }) {
   return (
@@ -16,290 +19,263 @@ function InsEmpty({ msg }) {
   )
 }
 
+function chartColors(isLight) {
+  return {
+    grid:       isLight ? 'rgba(0,0,0,0.06)'         : 'rgba(255,255,255,0.08)',
+    text:       isLight ? 'rgba(0,0,0,0.55)'          : 'rgba(255,255,255,0.55)',
+    tipBg:      isLight ? 'rgba(15,15,20,0.88)'       : 'rgba(255,255,255,0.95)',
+    tipText:    isLight ? '#ffffff'                    : '#0A0A0F',
+    gold:       isLight ? 'rgba(180,138,20,0.75)'     : 'rgba(212,175,55,0.75)',
+    goldBorder: isLight ? 'rgba(160,120,10,0.85)'     : 'rgba(212,175,55,0.9)',
+    teal:       isLight ? 'rgba(29,158,117,0.85)'     : 'rgba(78,205,196,0.85)',
+    tealBorder: isLight ? 'rgba(20,130,95,0.9)'       : 'rgba(78,205,196,1)',
+  }
+}
+
+function baseOptions(c, extraScales = {}) {
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: { duration: 260 },
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        backgroundColor: c.tipBg,
+        titleColor: c.tipText,
+        bodyColor: c.tipText,
+        padding: { x: 12, y: 8 },
+        cornerRadius: 6,
+        displayColors: false,
+        titleFont: { size: 12, weight: 500 },
+        bodyFont: { size: 11, weight: 400 },
+      },
+    },
+    scales: {
+      x: {
+        border: { display: false },
+        grid: { display: false },
+        ticks: { color: c.text, font: { size: 11, weight: 400 }, maxRotation: 45, minRotation: 0, autoSkip: true, maxTicksLimit: 18 },
+        ...extraScales.x,
+      },
+      y: {
+        border: { display: false },
+        grid: { color: c.grid },
+        ticks: { color: c.text, font: { size: 12, weight: 400 }, precision: 0 },
+        ...extraScales.y,
+      },
+    },
+  }
+}
+
 // ── Commit Velocity ───────────────────────────────────────────────────────────
 function VelocityChart({ commits }) {
-  const [hovered, setHovered] = useState(null)
-  if (!commits.length) return <InsEmpty msg="No commits in range" />
+  const canvasRef = useRef(null)
+  const chartRef  = useRef(null)
+  const { isLight } = useStore()
 
-  const weeks = {}
-  commits.forEach(c => {
-    const d = new Date(c.commit.author.date)
-    const sun = new Date(d); sun.setDate(d.getDate() - d.getDay())
-    const k = sun.toISOString().slice(0, 10)
-    weeks[k] = (weeks[k] || 0) + 1
-  })
-
-  let keys = Object.keys(weeks).sort()
-  let vals = keys.map(k => weeks[k])
-  let isMonthly = false
-
-  if (keys.length > 52) {
-    const months = {}
-    keys.forEach((k, i) => {
-      const mk = k.slice(0, 7)
-      months[mk] = (months[mk] || 0) + vals[i]
+  const { keys, vals } = useMemo(() => {
+    const weeks = {}
+    commits.forEach(c => {
+      const d = new Date(c.commit.author.date)
+      const sun = new Date(d); sun.setDate(d.getDate() - d.getDay())
+      const k = sun.toISOString().slice(0, 10)
+      weeks[k] = (weeks[k] || 0) + 1
     })
-    keys = Object.keys(months).sort()
-    vals = keys.map(k => months[k])
-    isMonthly = true
-  }
+    let keys = Object.keys(weeks).sort()
+    let vals = keys.map(k => weeks[k])
+    if (keys.length > 52) {
+      const months = {}
+      keys.forEach((k, i) => { const mk = k.slice(0, 7); months[mk] = (months[mk] || 0) + vals[i] })
+      keys = Object.keys(months).sort()
+      vals = keys.map(k => months[k])
+    }
+    return { keys, vals }
+  }, [commits])
 
-  const maxV = Math.max(1, ...vals)
-  const midV = Math.round(maxV / 2)
-  const W = 600, H = 150, PL = 32, PR = 6, PT = 14, PB = 42
-  const plotW = W - PL - PR
-  const plotH = H - PT - PB
-  const n = keys.length
-  const BW = Math.max(3, Math.min(32, Math.floor(plotW / Math.max(n, 1) * 0.72)))
-  const gap = n > 1 ? (plotW - BW * n) / (n - 1) : 0
-  const bx = i => PL + i * (BW + gap)
-  const bh = v => Math.max(2, Math.round(v / maxV * plotH))
-  const by = v => PT + plotH - bh(v)
-  const lx = i => bx(i) + BW / 2
-  const lblY = H - 4
+  useEffect(() => {
+    if (!canvasRef.current || !keys.length) return
+    chartRef.current?.destroy()
+    const c = chartColors(isLight)
+    chartRef.current = new Chart(canvasRef.current, {
+      type: 'bar',
+      data: {
+        labels: keys.map(k => k.slice(5)),
+        datasets: [{
+          data: vals,
+          backgroundColor: c.gold,
+          borderColor: c.goldBorder,
+          borderWidth: 1,
+          borderRadius: 4,
+          borderSkipped: false,
+          barPercentage: 0.85,
+          categoryPercentage: 0.9,
+        }],
+      },
+      options: {
+        ...baseOptions(c),
+        plugins: {
+          ...baseOptions(c).plugins,
+          tooltip: {
+            ...baseOptions(c).plugins.tooltip,
+            callbacks: {
+              title: items => keys[items[0].dataIndex]?.slice(5) ?? '',
+              label: item => `${Math.round(item.raw)} commits`,
+            },
+          },
+        },
+      },
+    })
+    return () => { chartRef.current?.destroy(); chartRef.current = null }
+  }, [keys, vals, isLight])
 
-  const tip = hovered !== null ? {
-    x: lx(hovered), y: by(vals[hovered]),
-    label: isMonthly ? keys[hovered] : 'wk ' + keys[hovered].slice(5),
-    val: vals[hovered],
-  } : null
-
-  const ax = { fontSize: 7, fill: 'var(--text3)', fontFamily: 'var(--mono)' }
-
+  if (!commits.length) return <InsEmpty msg="No commits in range" />
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', minWidth: 280, display: 'block', overflow: 'visible' }}>
-      <line x1={PL} y1={PT} x2={W-PR} y2={PT} stroke="var(--border)" strokeWidth="0.4" strokeDasharray="4,4"/>
-      <line x1={PL} y1={PT+plotH/2} x2={W-PR} y2={PT+plotH/2} stroke="var(--border)" strokeWidth="0.4" strokeDasharray="4,4"/>
-
-      <text x={PL-4} y={PT+4} textAnchor="end" style={ax}>{maxV}</text>
-      <text x={PL-4} y={PT+plotH/2+4} textAnchor="end" style={ax}>{midV}</text>
-      <text x={PL-4} y={PT+plotH+4} textAnchor="end" style={ax}>0</text>
-
-      {vals.map((v, i) => {
-        const x = bx(i), h = bh(v), y = by(v), cx = lx(i)
-        const isH = hovered === i
-        return (
-          <g key={i} style={{ cursor: 'default' }}
-            onMouseEnter={() => setHovered(i)} onMouseLeave={() => setHovered(null)}>
-            <rect x={x-1} y={PT} width={BW+2} height={plotH} fill="transparent"/>
-            <rect x={x} y={y} width={BW} height={h} rx="2"
-              fill="var(--gold)" opacity={isH ? 1 : v === maxV ? 0.82 : 0.35}/>
-            <text x={cx} y={lblY} textAnchor="end"
-              transform={`rotate(-45,${cx},${lblY})`}
-              style={{ ...ax, fill: isH ? 'var(--gold)' : 'var(--text3)' }}>
-              {keys[i].slice(5)}
-            </text>
-          </g>
-        )
-      })}
-
-      {tip && (() => {
-        const TW = 100, TH = 30
-        const tx = Math.min(Math.max(tip.x - TW/2, PL), W-TW-PR)
-        const ty = Math.max(tip.y - TH - 8, 2)
-        return (
-          <g pointerEvents="none">
-            <rect x={tx} y={ty} width={TW} height={TH} rx={4}
-              fill="var(--s1)" stroke="var(--border2)" strokeWidth={1}
-              style={{ filter: 'drop-shadow(0 2px 8px rgba(0,0,0,.3))' }}/>
-            <text x={tx+TW/2} y={ty+12} textAnchor="middle"
-              style={{ fontSize: 11, fontWeight: 700, fill: 'var(--gold)' }}>
-              {tip.val} commit{tip.val !== 1 ? 's' : ''}
-            </text>
-            <text x={tx+TW/2} y={ty+24} textAnchor="middle" style={{ fontSize: 7.5, fill: 'var(--text3)' }}>
-              {tip.label}
-            </text>
-          </g>
-        )
-      })()}
-    </svg>
+    <div style={{ position: 'relative', width: '100%', height: '280px' }}>
+      <canvas ref={canvasRef} role="img" aria-label="Commit velocity by week or month" />
+    </div>
   )
 }
 
 // ── Day of Week ───────────────────────────────────────────────────────────────
 function DOWChart({ commits }) {
-  const [hovered, setHovered] = useState(null)
+  const canvasRef = useRef(null)
+  const chartRef  = useRef(null)
+  const { isLight } = useStore()
+
+  const { counts, total } = useMemo(() => {
+    const counts = [0, 0, 0, 0, 0, 0, 0]
+    commits.forEach(c => { counts[(new Date(c.commit.author.date).getDay() + 6) % 7]++ })
+    return { counts, total: counts.reduce((a, b) => a + b, 0) }
+  }, [commits])
+
+  useEffect(() => {
+    if (!canvasRef.current || !total) return
+    chartRef.current?.destroy()
+    const c = chartColors(isLight)
+    const peakIdx = counts.indexOf(Math.max(...counts))
+    const bgColors = counts.map((_, i) => i === peakIdx ? c.gold.replace('0.75', '0.9') : c.gold)
+    const bdColors = counts.map((_, i) => i === peakIdx ? c.goldBorder : c.goldBorder.replace('0.9', '0.6'))
+
+    chartRef.current = new Chart(canvasRef.current, {
+      type: 'bar',
+      data: {
+        labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+        datasets: [{
+          data: counts,
+          backgroundColor: bgColors,
+          borderColor: bdColors,
+          borderWidth: 1,
+          borderRadius: 4,
+          borderSkipped: false,
+          barPercentage: 0.85,
+          categoryPercentage: 0.9,
+        }],
+      },
+      options: {
+        ...baseOptions(c, { x: { ticks: { color: c.text, font: { size: 11, weight: 400 }, maxRotation: 0 } } }),
+        plugins: {
+          ...baseOptions(c).plugins,
+          tooltip: {
+            ...baseOptions(c).plugins.tooltip,
+            callbacks: {
+              title: items => items[0].label,
+              label: item => {
+                const pct = total ? Math.round(item.raw / total * 100) : 0
+                return `${Math.round(item.raw)} commits · ${pct}% of week`
+              },
+            },
+          },
+        },
+      },
+    })
+    return () => { chartRef.current?.destroy(); chartRef.current = null }
+  }, [counts, total, isLight])
+
   if (!commits.length) return <InsEmpty msg="No commits in range" />
-
-  const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-  const counts = [0, 0, 0, 0, 0, 0, 0]
-  commits.forEach(c => { counts[(new Date(c.commit.author.date).getDay() + 6) % 7]++ })
-
-  const total = counts.reduce((a, b) => a + b, 0)
-  const max = Math.max(1, ...counts)
-  const peakIdx = counts.indexOf(max)
-
-  const W = 320, H = 110, PL = 26, PR = 6, PT = 12, PB = 18
-  const plotW = W - PL - PR
-  const plotH = H - PT - PB
-  const BW = Math.floor(plotW / 7 * 0.58)
-  const gap = (plotW - BW * 7) / 6
-  const bx = i => PL + i * (BW + gap)
-  const bh = v => Math.max(2, Math.round(v / max * plotH))
-  const by = v => PT + plotH - bh(v)
-
-  const ax = { fontSize: 7, fill: 'var(--text3)', fontFamily: 'var(--mono)' }
-
-  const tip = hovered !== null ? {
-    x: bx(hovered) + BW / 2, y: by(counts[hovered]),
-    day: dayNames[hovered], val: counts[hovered],
-    pct: total ? Math.round(counts[hovered] / total * 100) : 0,
-  } : null
-
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', display: 'block', overflow: 'visible' }}>
-      <line x1={PL} y1={PT} x2={W-PR} y2={PT} stroke="var(--border)" strokeWidth="0.4" strokeDasharray="4,4"/>
-      <text x={PL-4} y={PT+4} textAnchor="end" style={ax}>{max}</text>
-
-      {dayNames.map((d, i) => {
-        const h = bh(counts[i]), y = by(counts[i])
-        const isH = hovered === i
-        const isPeak = i === peakIdx
-        return (
-          <g key={d} style={{ cursor: 'default' }}
-            onMouseEnter={() => setHovered(i)} onMouseLeave={() => setHovered(null)}>
-            <rect x={bx(i)-4} y={PT} width={BW+8} height={plotH} fill="transparent"/>
-            <rect x={bx(i)} y={y} width={BW} height={h} rx="2"
-              fill="var(--gold)" opacity={isH ? 1 : isPeak ? 0.82 : 0.35}/>
-            <text x={bx(i)+BW/2} y={H-3} textAnchor="middle"
-              style={{ ...ax, fill: isPeak && !isH ? 'var(--gold)' : 'var(--text3)' }}>
-              {d}
-            </text>
-            {hovered === null && counts[i] > 0 && (
-              <text x={bx(i)+BW/2} y={y-3} textAnchor="middle"
-                style={{ fontSize: 7, fill: 'var(--text2)', fontFamily: 'var(--mono)' }}>
-                {counts[i]}
-              </text>
-            )}
-          </g>
-        )
-      })}
-
-      {tip && (() => {
-        const TW = 108, TH = 30
-        const tx = Math.min(Math.max(tip.x - TW/2, 0), W-TW)
-        const ty = Math.max(tip.y - TH - 6, 2)
-        return (
-          <g pointerEvents="none">
-            <rect x={tx} y={ty} width={TW} height={TH} rx={4}
-              fill="var(--s1)" stroke="var(--border2)" strokeWidth={1}
-              style={{ filter: 'drop-shadow(0 2px 8px rgba(0,0,0,.3))' }}/>
-            <text x={tx+TW/2} y={ty+12} textAnchor="middle"
-              style={{ fontSize: 11, fontWeight: 700, fill: 'var(--gold)' }}>
-              {tip.day}: {tip.val}
-            </text>
-            <text x={tx+TW/2} y={ty+24} textAnchor="middle" style={{ fontSize: 7.5, fill: 'var(--text3)' }}>
-              {tip.pct}% of all commits
-            </text>
-          </g>
-        )
-      })()}
-    </svg>
+    <div style={{ position: 'relative', width: '100%', height: '220px' }}>
+      <canvas ref={canvasRef} role="img" aria-label="Commits by day of week" />
+    </div>
   )
 }
 
 // ── Avg PR Merge Time ─────────────────────────────────────────────────────────
 function PRMergeTrendChart({ prs }) {
-  const [hovered, setHovered] = useState(null)
-  const merged = prs.filter(p => p.merged_at)
-  if (merged.length < 2) return <InsEmpty msg="Need 2+ merged PRs" />
+  const canvasRef = useRef(null)
+  const chartRef  = useRef(null)
+  const { isLight } = useStore()
 
-  const weeks = {}
-  merged.forEach(p => {
-    const d = new Date(p.merged_at)
-    const sun = new Date(d); sun.setDate(d.getDate() - d.getDay())
-    const k = sun.toISOString().slice(0, 10)
-    if (!weeks[k]) weeks[k] = { sum: 0, n: 0 }
-    weeks[k].sum += (new Date(p.merged_at) - new Date(p.created_at)) / 86400000
-    weeks[k].n++
-  })
-  const keys = Object.keys(weeks).sort()
-  const vals = keys.map(k => +(weeks[k].sum / weeks[k].n).toFixed(1))
-  const counts = keys.map(k => weeks[k].n)
+  const { keys, vals, counts } = useMemo(() => {
+    const merged = prs.filter(p => p.merged_at)
+    if (merged.length < 2) return { keys: [], vals: [], counts: [] }
+    const weeks = {}
+    merged.forEach(p => {
+      const d = new Date(p.merged_at)
+      const sun = new Date(d); sun.setDate(d.getDate() - d.getDay())
+      const k = sun.toISOString().slice(0, 10)
+      if (!weeks[k]) weeks[k] = { sum: 0, n: 0 }
+      weeks[k].sum += (new Date(p.merged_at) - new Date(p.created_at)) / 86400000
+      weeks[k].n++
+    })
+    const keys = Object.keys(weeks).sort()
+    const vals   = keys.map(k => +(weeks[k].sum / weeks[k].n).toFixed(2))
+    const counts = keys.map(k => weeks[k].n)
+    return { keys, vals, counts }
+  }, [prs])
 
-  const maxV = Math.max(1, ...vals)
-  const W = 600, H = 150, PL = 32, PR = 6, PT = 14, PB = 42
-  const plotW = W - PL - PR
-  const plotH = H - PT - PB
-  const n = keys.length
-  const lblY = H - 4
+  useEffect(() => {
+    if (!canvasRef.current || keys.length < 2) return
+    chartRef.current?.destroy()
+    const c = chartColors(isLight)
 
-  const px = i => PL + (i / Math.max(n - 1, 1)) * plotW
-  const py = v => PT + plotH - (v / maxV) * plotH
-  const pts = vals.map((v, i) => [px(i), py(v)])
-  const polyPts = pts.map(p => p.join(',')).join(' ')
-  const areaD = n > 1
-    ? `M${pts[0][0]},${PT+plotH} ${pts.map(p => `L${p[0]},${p[1]}`).join(' ')} L${pts[n-1][0]},${PT+plotH} Z`
-    : ''
+    chartRef.current = new Chart(canvasRef.current, {
+      type: 'line',
+      data: {
+        labels: keys.map(k => k.slice(5)),
+        datasets: [{
+          data: vals,
+          borderColor: c.teal,
+          borderWidth: 2,
+          pointBackgroundColor: c.tealBorder,
+          pointBorderColor: 'transparent',
+          pointRadius: 3,
+          pointHoverRadius: 5,
+          fill: false,
+          tension: 0.3,
+        }],
+      },
+      options: {
+        ...baseOptions(c, {
+          y: {
+            border: { display: false },
+            grid: { color: c.grid },
+            ticks: {
+              color: c.text,
+              font: { size: 12, weight: 400 },
+              callback: v => `${v}d`,
+            },
+          },
+        }),
+        plugins: {
+          ...baseOptions(c).plugins,
+          tooltip: {
+            ...baseOptions(c).plugins.tooltip,
+            callbacks: {
+              title: items => `wk ${keys[items[0].dataIndex]?.slice(5) ?? ''}`,
+              label: item => `${item.raw.toFixed(1)}d avg · ${counts[item.dataIndex]} PR${counts[item.dataIndex] !== 1 ? 's' : ''}`,
+            },
+          },
+        },
+      },
+    })
+    return () => { chartRef.current?.destroy(); chartRef.current = null }
+  }, [keys, vals, counts, isLight])
 
-  const ax = { fontSize: 7, fill: 'var(--text3)', fontFamily: 'var(--mono)' }
-
-  const tip = hovered !== null ? {
-    x: pts[hovered][0], y: pts[hovered][1],
-    label: 'wk ' + keys[hovered].slice(5),
-    val: vals[hovered], n: counts[hovered],
-  } : null
-
+  if (prs.filter(p => p.merged_at).length < 2) return <InsEmpty msg="Need 2+ merged PRs" />
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', display: 'block', overflow: 'visible' }}>
-      <defs>
-        <linearGradient id="prmt-grad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="var(--teal)" stopOpacity="0.12"/>
-          <stop offset="100%" stopColor="var(--teal)" stopOpacity="0"/>
-        </linearGradient>
-      </defs>
-
-      <line x1={PL} y1={PT} x2={W-PR} y2={PT} stroke="var(--border)" strokeWidth="0.4" strokeDasharray="4,4"/>
-      <line x1={PL} y1={PT+plotH/2} x2={W-PR} y2={PT+plotH/2} stroke="var(--border)" strokeWidth="0.4" strokeDasharray="4,4"/>
-
-      <text x={PL-4} y={PT+4} textAnchor="end" style={ax}>{maxV}d</text>
-      <text x={PL-4} y={PT+plotH/2+4} textAnchor="end" style={ax}>{(maxV/2).toFixed(1)}d</text>
-      <text x={PL-4} y={PT+plotH+4} textAnchor="end" style={ax}>0d</text>
-
-      {areaD && <path d={areaD} fill="url(#prmt-grad)"/>}
-      <polyline points={polyPts} fill="none" stroke="var(--teal)" strokeWidth="1.5"
-        strokeLinejoin="round" strokeLinecap="round"/>
-
-      {vals.map((v, i) => {
-        const cx = pts[i][0]
-        const isH = hovered === i
-        return (
-          <g key={i} style={{ cursor: 'default' }}
-            onMouseEnter={() => setHovered(i)} onMouseLeave={() => setHovered(null)}>
-            <circle cx={cx} cy={pts[i][1]} r={9} fill="transparent"/>
-            <circle cx={cx} cy={pts[i][1]}
-              r={isH ? 4 : 2}
-              fill={isH ? 'var(--teal)' : 'var(--s1)'}
-              stroke="var(--teal)" strokeWidth={isH ? 0 : 1.5}/>
-            <text x={cx} y={lblY} textAnchor="end"
-              transform={`rotate(-45,${cx},${lblY})`}
-              style={{ ...ax, fill: isH ? 'var(--teal)' : 'var(--text3)' }}>
-              {keys[i].slice(5)}
-            </text>
-          </g>
-        )
-      })}
-
-      {tip && (() => {
-        const TW = 100, TH = 30
-        const tx = Math.min(Math.max(tip.x - TW/2, PL), W-TW-PR)
-        const ty = Math.max(tip.y - TH - 10, 2)
-        return (
-          <g pointerEvents="none">
-            <rect x={tx} y={ty} width={TW} height={TH} rx={4}
-              fill="var(--s1)" stroke="var(--border2)" strokeWidth={1}
-              style={{ filter: 'drop-shadow(0 2px 8px rgba(0,0,0,.3))' }}/>
-            <text x={tx+TW/2} y={ty+12} textAnchor="middle"
-              style={{ fontSize: 11, fontWeight: 700, fill: 'var(--teal)' }}>
-              {tip.val}d avg
-            </text>
-            <text x={tx+TW/2} y={ty+24} textAnchor="middle" style={{ fontSize: 7.5, fill: 'var(--text3)' }}>
-              {tip.label} · {tip.n} PR{tip.n !== 1 ? 's' : ''}
-            </text>
-          </g>
-        )
-      })()}
-    </svg>
+    <div style={{ position: 'relative', width: '100%', height: '260px' }}>
+      <canvas ref={canvasRef} role="img" aria-label="Average PR merge time by week" />
+    </div>
   )
 }
 
@@ -455,7 +431,7 @@ function OverviewModal({ onClose }) {
 
 // ── Main InsightsView ─────────────────────────────────────────────────────────
 export default function InsightsView() {
-  const { API, commitDetailCache, currentRepo } = useStore()
+  const { API, commitDetailCache, currentRepo, isLight } = useStore()
   const toast = useToast()
   const [insCommits, setInsCommits] = useState(null)
   const [insPRs, setInsPRs]         = useState(null)
@@ -604,7 +580,7 @@ export default function InsightsView() {
       <div className="insights-grid">
         <div className="ip full">
           <div className="ip-header">
-            <div><div className="ip-title">Commit Velocity</div><div className="ip-sub">Commits per {filteredCommits.length > 364 ? 'month' : 'week'} · hover for exact count</div></div>
+            <div><div className="ip-title">Commit Velocity</div><div className="ip-sub">Commits per {filteredCommits.length > 364 ? 'month' : 'week'}</div></div>
             <span className="ip-badge">{filteredCommits.length} commits</span>
           </div>
           <VelocityChart commits={filteredCommits} />
@@ -621,7 +597,7 @@ export default function InsightsView() {
         </div>
 
         <div className="ip">
-          <div className="ip-header"><div><div className="ip-title">Day of Week</div><div className="ip-sub">Peak commit days · hover for details</div></div></div>
+          <div className="ip-header"><div><div className="ip-title">Day of Week</div><div className="ip-sub">Peak commit days</div></div></div>
           <DOWChart commits={filteredCommits} />
         </div>
 
@@ -631,7 +607,7 @@ export default function InsightsView() {
         </div>
 
         <div className="ip full">
-          <div className="ip-header"><div><div className="ip-title">Avg PR Merge Time</div><div className="ip-sub">Days from open to merge, by week · hover for details</div></div></div>
+          <div className="ip-header"><div><div className="ip-title">Avg PR Merge Time</div><div className="ip-sub">Days from open to merge, by week</div></div></div>
           <PRMergeTrendChart prs={filteredPRs} />
         </div>
 
