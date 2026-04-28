@@ -3,14 +3,24 @@ import useStore from '../../store/useStore.js'
 import { useToast } from '../../context/ToastContext.jsx'
 import { fetchAllCommits, fetchAllPRs } from '../../api/github.js'
 import { generateProjectOverview } from '../../api/anthropic.js'
-import { detectType, timeAgo, dayKey, avatarColor, avatarInitial, COLORS, TYPE_COLORS, esc } from '../../utils/index.js'
+import { detectType, timeAgo, avatarColor, avatarInitial, COLORS, TYPE_COLORS, esc } from '../../utils/index.js'
 
-function insEmpty(msg) {
-  return `<div class="ins-empty"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>${msg}</div>`
+function InsEmpty({ msg }) {
+  return (
+    <div className="ins-empty">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+        <circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/>
+      </svg>
+      {msg}
+    </div>
+  )
 }
 
-function renderVelocityChart(commits) {
-  if (!commits.length) return insEmpty('No commits in range')
+// ── Commit Velocity ───────────────────────────────────────────────────────────
+function VelocityChart({ commits }) {
+  const [hovered, setHovered] = useState(null)
+  if (!commits.length) return <InsEmpty msg="No commits in range" />
+
   const weeks = {}
   commits.forEach(c => {
     const d = new Date(c.commit.author.date)
@@ -18,26 +28,300 @@ function renderVelocityChart(commits) {
     const k = sun.toISOString().slice(0, 10)
     weeks[k] = (weeks[k] || 0) + 1
   })
-  const keys = Object.keys(weeks).sort()
-  const vals = keys.map(k => weeks[k])
+
+  let keys = Object.keys(weeks).sort()
+  let vals = keys.map(k => weeks[k])
+  let isMonthly = false
+
+  if (keys.length > 52) {
+    const months = {}
+    keys.forEach((k, i) => {
+      const mk = k.slice(0, 7)
+      months[mk] = (months[mk] || 0) + vals[i]
+    })
+    keys = Object.keys(months).sort()
+    vals = keys.map(k => months[k])
+    isMonthly = true
+  }
+
   const maxV = Math.max(1, ...vals)
-  const W = 600, H = 110, PAD_X = 30, PAD_Y = 16
-  const BW = Math.max(8, Math.min(32, Math.floor((W - PAD_X * 2) / (keys.length + 1))))
-  const gap = keys.length > 1 ? (W - PAD_X * 2 - BW * keys.length) / (keys.length - 1) : 0
-  const bx = i => PAD_X + i * (BW + gap)
-  const bh = v => Math.max(3, Math.round(v / maxV * (H - PAD_Y * 2)))
-  const bars = vals.map((v, i) => {
-    const x = bx(i), h = bh(v), y = H - PAD_Y - h
-    const isMax = v === maxV
-    return `<g><rect x="${x}" y="${y}" width="${BW}" height="${h}" rx="3" fill="${isMax ? 'var(--gold)' : 'var(--gold-dim)'}" opacity="${isMax ? 1 : .75}"/>
-      <text x="${x + BW / 2}" y="${H - 2}" text-anchor="middle" class="axis">${keys[i].slice(5)}</text>
-      <text x="${x + BW / 2}" y="${y - 3}" text-anchor="middle" class="axis" style="fill:var(--text2)">${v}</text></g>`
-  }).join('')
-  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;min-width:300px">${bars}</svg>`
+  const midV = Math.round(maxV / 2)
+  const W = 600, H = 130, PL = 36, PR = 8, PT = 16, PB = 22
+  const plotW = W - PL - PR
+  const plotH = H - PT - PB
+  const n = keys.length
+  const BW = Math.max(4, Math.min(36, Math.floor(plotW / Math.max(n, 1) * 0.75)))
+  const gap = n > 1 ? (plotW - BW * n) / (n - 1) : 0
+  const bx = i => PL + i * (BW + gap)
+  const bh = v => Math.max(3, Math.round(v / maxV * plotH))
+  const by = v => PT + plotH - bh(v)
+  const labelStep = Math.ceil(n / 10)
+
+  const tip = hovered !== null ? {
+    x: bx(hovered) + BW / 2,
+    y: by(vals[hovered]),
+    label: isMonthly ? keys[hovered] : 'week of ' + keys[hovered].slice(5),
+    val: vals[hovered],
+  } : null
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', minWidth: 280, display: 'block', overflow: 'visible' }}>
+      {/* Gridlines */}
+      <line x1={PL} y1={PT} x2={W - PR} y2={PT} stroke="var(--border)" strokeWidth="0.5" strokeDasharray="3,3"/>
+      <line x1={PL} y1={PT + plotH / 2} x2={W - PR} y2={PT + plotH / 2} stroke="var(--border)" strokeWidth="0.5" strokeDasharray="3,3"/>
+
+      {/* Y labels */}
+      <text x={PL - 4} y={PT + 4} textAnchor="end" className="axis">{maxV}</text>
+      <text x={PL - 4} y={PT + plotH / 2 + 4} textAnchor="end" className="axis">{midV}</text>
+      <text x={PL - 4} y={PT + plotH + 4} textAnchor="end" className="axis">0</text>
+
+      {vals.map((v, i) => {
+        const x = bx(i), h = bh(v), y = by(v)
+        const isH = hovered === i
+        return (
+          <g key={i} style={{ cursor: 'default' }}
+            onMouseEnter={() => setHovered(i)}
+            onMouseLeave={() => setHovered(null)}
+          >
+            <rect x={x - 1} y={PT} width={BW + 2} height={plotH} fill="transparent"/>
+            <rect x={x} y={y} width={BW} height={h} rx="3"
+              fill="var(--gold)"
+              opacity={isH ? 1 : v === maxV ? 0.85 : 0.4}
+            />
+            {i % labelStep === 0 && (
+              <text x={x + BW / 2} y={H - 4} textAnchor="middle" className="axis">
+                {keys[i].slice(5)}
+              </text>
+            )}
+          </g>
+        )
+      })}
+
+      {tip && (() => {
+        const TW = 110, TH = 34
+        const tx = Math.min(Math.max(tip.x - TW / 2, PL), W - TW - PR)
+        const ty = Math.max(tip.y - TH - 6, 2)
+        return (
+          <g pointerEvents="none">
+            <rect x={tx} y={ty} width={TW} height={TH} rx={5}
+              fill="var(--s1)" stroke="var(--border2)" strokeWidth={1}
+              style={{ filter: 'drop-shadow(0 2px 8px rgba(0,0,0,.35))' }}/>
+            <text x={tx + TW / 2} y={ty + 14} textAnchor="middle"
+              style={{ fontSize: 12, fontWeight: 700, fill: 'var(--gold)' }}>
+              {tip.val} commit{tip.val !== 1 ? 's' : ''}
+            </text>
+            <text x={tx + TW / 2} y={ty + 27} textAnchor="middle"
+              style={{ fontSize: 9, fill: 'var(--text3)' }}>
+              {tip.label}
+            </text>
+          </g>
+        )
+      })()}
+    </svg>
+  )
 }
 
+// ── Day of Week ───────────────────────────────────────────────────────────────
+function DOWChart({ commits }) {
+  const [hovered, setHovered] = useState(null)
+  if (!commits.length) return <InsEmpty msg="No commits in range" />
+
+  const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+  const counts = [0, 0, 0, 0, 0, 0, 0]
+  commits.forEach(c => { counts[(new Date(c.commit.author.date).getDay() + 6) % 7]++ })
+
+  const total = counts.reduce((a, b) => a + b, 0)
+  const max = Math.max(1, ...counts)
+  const peakIdx = counts.indexOf(max)
+
+  const W = 320, H = 120, PL = 28, PR = 8, PT = 16, PB = 24
+  const plotW = W - PL - PR
+  const plotH = H - PT - PB
+  const BW = Math.floor(plotW / 7 * 0.65)
+  const gap = (plotW - BW * 7) / 6
+  const bx = i => PL + i * (BW + gap)
+  const bh = v => Math.max(3, Math.round(v / max * plotH))
+  const by = v => PT + plotH - bh(v)
+
+  const tip = hovered !== null ? {
+    x: bx(hovered) + BW / 2,
+    y: by(counts[hovered]),
+    day: dayNames[hovered],
+    val: counts[hovered],
+    pct: total ? Math.round(counts[hovered] / total * 100) : 0,
+  } : null
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', display: 'block', overflow: 'visible' }}>
+      <line x1={PL} y1={PT} x2={W - PR} y2={PT} stroke="var(--border)" strokeWidth="0.5" strokeDasharray="3,3"/>
+      <text x={PL - 4} y={PT + 4} textAnchor="end" className="axis">{max}</text>
+
+      {dayNames.map((d, i) => {
+        const h = bh(counts[i]), y = by(counts[i])
+        const isH = hovered === i
+        const isPeak = i === peakIdx
+        return (
+          <g key={d} style={{ cursor: 'default' }}
+            onMouseEnter={() => setHovered(i)}
+            onMouseLeave={() => setHovered(null)}
+          >
+            <rect x={bx(i) - 4} y={PT} width={BW + 8} height={plotH} fill="transparent"/>
+            <rect x={bx(i)} y={y} width={BW} height={h} rx="3"
+              fill="var(--gold)"
+              opacity={isH ? 1 : isPeak ? 0.85 : 0.38}
+            />
+            <text x={bx(i) + BW / 2} y={H - 6} textAnchor="middle" className="axis"
+              style={{ fill: isPeak && !isH ? 'var(--gold)' : undefined }}>
+              {d}
+            </text>
+            {hovered === null && counts[i] > 0 && (
+              <text x={bx(i) + BW / 2} y={y - 3} textAnchor="middle" className="axis"
+                style={{ fill: 'var(--text2)' }}>
+                {counts[i]}
+              </text>
+            )}
+          </g>
+        )
+      })}
+
+      {tip && (() => {
+        const TW = 108, TH = 34
+        const tx = Math.min(Math.max(tip.x - TW / 2, 0), W - TW)
+        const ty = Math.max(tip.y - TH - 6, 2)
+        return (
+          <g pointerEvents="none">
+            <rect x={tx} y={ty} width={TW} height={TH} rx={5}
+              fill="var(--s1)" stroke="var(--border2)" strokeWidth={1}
+              style={{ filter: 'drop-shadow(0 2px 8px rgba(0,0,0,.35))' }}/>
+            <text x={tx + TW / 2} y={ty + 14} textAnchor="middle"
+              style={{ fontSize: 12, fontWeight: 700, fill: 'var(--gold)' }}>
+              {tip.day}: {tip.val} commits
+            </text>
+            <text x={tx + TW / 2} y={ty + 27} textAnchor="middle"
+              style={{ fontSize: 9, fill: 'var(--text3)' }}>
+              {tip.pct}% of total activity
+            </text>
+          </g>
+        )
+      })()}
+    </svg>
+  )
+}
+
+// ── Avg PR Merge Time ─────────────────────────────────────────────────────────
+function PRMergeTrendChart({ prs }) {
+  const [hovered, setHovered] = useState(null)
+  const merged = prs.filter(p => p.merged_at)
+  if (merged.length < 2) return <InsEmpty msg="Need 2+ merged PRs" />
+
+  const weeks = {}
+  merged.forEach(p => {
+    const d = new Date(p.merged_at)
+    const sun = new Date(d); sun.setDate(d.getDate() - d.getDay())
+    const k = sun.toISOString().slice(0, 10)
+    if (!weeks[k]) weeks[k] = { sum: 0, n: 0 }
+    weeks[k].sum += (new Date(p.merged_at) - new Date(p.created_at)) / 86400000
+    weeks[k].n++
+  })
+  const keys = Object.keys(weeks).sort()
+  const vals = keys.map(k => +(weeks[k].sum / weeks[k].n).toFixed(1))
+  const counts = keys.map(k => weeks[k].n)
+
+  const maxV = Math.max(1, ...vals)
+  const W = 320, H = 120, PL = 34, PR = 8, PT = 16, PB = 24
+  const plotW = W - PL - PR
+  const plotH = H - PT - PB
+  const n = keys.length
+
+  const px = i => PL + (i / Math.max(n - 1, 1)) * plotW
+  const py = v => PT + plotH - (v / maxV) * plotH
+
+  const pts = vals.map((v, i) => [px(i), py(v)])
+  const polyPts = pts.map(p => p.join(',')).join(' ')
+  const areaD = n > 1
+    ? `M${pts[0][0]},${PT + plotH} ${pts.map(p => `L${p[0]},${p[1]}`).join(' ')} L${pts[n-1][0]},${PT + plotH} Z`
+    : ''
+
+  const labelStep = Math.ceil(n / 6)
+
+  const tip = hovered !== null ? {
+    x: pts[hovered][0],
+    y: pts[hovered][1],
+    label: 'wk ' + keys[hovered].slice(5),
+    val: vals[hovered],
+    n: counts[hovered],
+  } : null
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', display: 'block', overflow: 'visible' }}>
+      <defs>
+        <linearGradient id="prmt-grad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="var(--teal)" stopOpacity="0.22"/>
+          <stop offset="100%" stopColor="var(--teal)" stopOpacity="0"/>
+        </linearGradient>
+      </defs>
+
+      {/* Gridlines */}
+      <line x1={PL} y1={PT} x2={W - PR} y2={PT} stroke="var(--border)" strokeWidth="0.5" strokeDasharray="3,3"/>
+      <line x1={PL} y1={PT + plotH / 2} x2={W - PR} y2={PT + plotH / 2} stroke="var(--border)" strokeWidth="0.5" strokeDasharray="3,3"/>
+
+      {/* Y labels */}
+      <text x={PL - 4} y={PT + 4} textAnchor="end" className="axis">{maxV}d</text>
+      <text x={PL - 4} y={PT + plotH / 2 + 4} textAnchor="end" className="axis">{(maxV / 2).toFixed(1)}d</text>
+      <text x={PL - 4} y={PT + plotH + 4} textAnchor="end" className="axis">0d</text>
+
+      {areaD && <path d={areaD} fill="url(#prmt-grad)"/>}
+      <polyline points={polyPts} fill="none" stroke="var(--teal)" strokeWidth="2" strokeLinejoin="round"/>
+
+      {vals.map((v, i) => (
+        <g key={i} style={{ cursor: 'default' }}
+          onMouseEnter={() => setHovered(i)}
+          onMouseLeave={() => setHovered(null)}
+        >
+          <circle cx={pts[i][0]} cy={pts[i][1]} r={10} fill="transparent"/>
+          <circle cx={pts[i][0]} cy={pts[i][1]}
+            r={hovered === i ? 5 : 3}
+            fill={hovered === i ? 'var(--teal)' : 'var(--s1)'}
+            stroke="var(--teal)"
+            strokeWidth={hovered === i ? 0 : 2}
+          />
+          {i % labelStep === 0 && (
+            <text x={pts[i][0]} y={H - 6}
+              textAnchor={i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'}
+              className="axis">
+              {keys[i].slice(5)}
+            </text>
+          )}
+        </g>
+      ))}
+
+      {tip && (() => {
+        const TW = 110, TH = 34
+        const tx = Math.min(Math.max(tip.x - TW / 2, 0), W - TW)
+        const ty = Math.max(tip.y - TH - 8, 2)
+        return (
+          <g pointerEvents="none">
+            <rect x={tx} y={ty} width={TW} height={TH} rx={5}
+              fill="var(--s1)" stroke="var(--border2)" strokeWidth={1}
+              style={{ filter: 'drop-shadow(0 2px 8px rgba(0,0,0,.35))' }}/>
+            <text x={tx + TW / 2} y={ty + 14} textAnchor="middle"
+              style={{ fontSize: 12, fontWeight: 700, fill: 'var(--teal)' }}>
+              {tip.val}d avg
+            </text>
+            <text x={tx + TW / 2} y={ty + 27} textAnchor="middle"
+              style={{ fontSize: 9, fill: 'var(--text3)' }}>
+              {tip.label} · {tip.n} PR{tip.n !== 1 ? 's' : ''}
+            </text>
+          </g>
+        )
+      })()}
+    </svg>
+  )
+}
+
+// ── Static chart helpers (unchanged) ─────────────────────────────────────────
 function renderTypeDonut(commits) {
-  if (!commits.length) return insEmpty('No commits in range')
+  if (!commits.length) return `<div class="ins-empty"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>No commits in range</div>`
   const counts = {}
   commits.forEach(c => { const t = detectType(c.commit.message); counts[t] = (counts[t] || 0) + 1 })
   const total = commits.length
@@ -66,7 +350,7 @@ function renderTypeDonut(commits) {
 }
 
 function renderHODChart(commits) {
-  if (!commits.length) return insEmpty('No commits in range')
+  if (!commits.length) return `<div class="ins-empty"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>No commits in range</div>`
   const counts = new Array(24).fill(0)
   commits.forEach(c => { counts[new Date(c.commit.author.date).getHours()]++ })
   const max = Math.max(1, ...counts)
@@ -81,28 +365,8 @@ function renderHODChart(commits) {
     <div style="font-size:11px;color:var(--text3);margin-top:8px">Peak: <span style="color:var(--gold)">${peakH}:00–${peakH + 1}:00</span> (${max} commits)</div>`
 }
 
-function renderDOWChart(commits) {
-  if (!commits.length) return insEmpty('No commits in range')
-  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-  const counts = [0, 0, 0, 0, 0, 0, 0]
-  commits.forEach(c => { counts[(new Date(c.commit.author.date).getDay() + 6) % 7]++ })
-  const max = Math.max(1, ...counts)
-  const peakIdx = counts.indexOf(max)
-  const W = 260, H = 100, PAD = 20, BW = 24, GAP = 8
-  const totalW = days.length * (BW + GAP) - GAP
-  const startX = (W - totalW) / 2
-  const bars = days.map((d, i) => {
-    const bh = Math.max(2, Math.round(counts[i] / max * (H - PAD * 2)))
-    const by = H - PAD - bh
-    return `<rect x="${startX + i * (BW + GAP)}" y="${by}" width="${BW}" height="${bh}" rx="3" fill="${i === peakIdx ? 'var(--gold)' : 'var(--gold-dim)'}"/>
-      <text x="${startX + i * (BW + GAP) + BW / 2}" y="${H - 4}" text-anchor="middle" class="axis">${d}</text>
-      ${counts[i] ? `<text x="${startX + i * (BW + GAP) + BW / 2}" y="${by - 3}" text-anchor="middle" class="axis" style="fill:var(--text2)">${counts[i]}</text>` : ''}`
-  }).join('')
-  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%">${bars}</svg>`
-}
-
 function renderPRFunnel(prs) {
-  if (!prs.length) return insEmpty('No PRs in range')
+  if (!prs.length) return `<div class="ins-empty"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>No PRs in range</div>`
   const open = prs.filter(p => p.state === 'open').length
   const merged = prs.filter(p => p.merged_at).length
   const closed = prs.filter(p => p.state === 'closed' && !p.merged_at).length
@@ -118,53 +382,15 @@ function renderPRFunnel(prs) {
   </div>`).join('')
 }
 
-function renderPRMergeTrend(prs) {
-  const merged = prs.filter(p => p.merged_at)
-  if (merged.length < 2) return insEmpty('Need 2+ merged PRs')
-  const weeks = {}
-  merged.forEach(p => {
-    const d = new Date(p.merged_at)
-    const sun = new Date(d); sun.setDate(d.getDate() - d.getDay())
-    const k = sun.toISOString().slice(0, 10)
-    if (!weeks[k]) weeks[k] = { sum: 0, n: 0 }
-    weeks[k].sum += (new Date(p.merged_at) - new Date(p.created_at)) / 86400000
-    weeks[k].n++
-  })
-  const keys = Object.keys(weeks).sort()
-  const vals = keys.map(k => +(weeks[k].sum / weeks[k].n).toFixed(1))
-  const maxV = Math.max(1, ...vals)
-  const W = 260, H = 100, PAD = 20
-  const x = i => PAD + (i / (keys.length - 1 || 1)) * (W - PAD * 2)
-  const y = v => H - PAD - v / maxV * (H - PAD * 2)
-  const pts = vals.map((v, i) => [x(i), y(v)])
-  const poly = pts.map(p => p.join(',')).join(' ')
-  const area = `M${pts[0][0]},${H - PAD} ${pts.map(p => `L${p[0]},${p[1]}`).join(' ')} L${pts[pts.length - 1][0]},${H - PAD} Z`
-  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;overflow:visible">
-    <defs><linearGradient id="lg2" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="var(--teal)" stop-opacity=".25"/>
-      <stop offset="100%" stop-color="var(--teal)" stop-opacity="0"/>
-    </linearGradient></defs>
-    <path d="${area}" fill="url(#lg2)"/>
-    <polyline points="${poly}" fill="none" stroke="var(--teal)" stroke-width="2" stroke-linejoin="round"/>
-    ${pts.map((p, i) => `<circle cx="${p[0]}" cy="${p[1]}" r="3" fill="var(--teal)"/>`).join('')}
-    <text x="${PAD}" y="${H}" class="axis">${keys[0].slice(5)}</text>
-    <text x="${W - PAD}" y="${H}" text-anchor="end" class="axis">${keys[keys.length - 1].slice(5)}</text>
-    <text x="${PAD}" y="${y(maxV) + 4}" class="axis">${maxV}d</text>
-  </svg>`
-}
-
 // ── Project Overview Modal ────────────────────────────────────────────────────
 function OverviewModal({ onClose }) {
   const { API, currentRepo } = useStore()
   const toast = useToast()
-  const [result, setResult]     = useState(null)
-  const [loading, setLoading]   = useState(true)
+  const [result, setResult]   = useState(null)
+  const [loading, setLoading] = useState(true)
   const [progress, setProgress] = useState('Fetching commit history…')
-  const [overviewCache, setOverviewCache] = useState(null)
 
-  useEffect(() => {
-    generate()
-  }, [])
+  useEffect(() => { generate() }, [])
 
   async function generate() {
     setLoading(true)
@@ -180,9 +406,7 @@ function OverviewModal({ onClose }) {
         toast('❌', 'Overview failed', e.message)
         onClose()
       }
-    } finally {
-      setLoading(false)
-    }
+    } finally { setLoading(false) }
   }
 
   return (
@@ -195,9 +419,7 @@ function OverviewModal({ onClose }) {
               <div className="ai-thinking">
                 <div className="ai-thinking-msg">{progress}</div>
                 <div className="ai-dots">
-                  <div className="ai-dot"></div>
-                  <div className="ai-dot"></div>
-                  <div className="ai-dot"></div>
+                  <div className="ai-dot"></div><div className="ai-dot"></div><div className="ai-dot"></div>
                 </div>
               </div>
             </div>
@@ -212,68 +434,27 @@ function OverviewModal({ onClose }) {
                   <span style={{ fontFamily: 'var(--mono)', fontSize: 11, padding: '4px 10px', borderRadius: 'var(--r-pill)', background: 'var(--s3)', color: 'var(--text3)', whiteSpace: 'nowrap' }}>{currentRepo.language}</span>
                 )}
               </div>
-
-              {result.project_type && (
-                <div className="ob-section">
-                  <div className="ob-section-label">What is this project?</div>
-                  <div style={{ fontSize: 13, color: 'var(--text2)', lineHeight: 1.65 }}>{result.project_type}</div>
-                </div>
-              )}
-
-              {result.tech_stack?.length > 0 && (
-                <div className="ob-section">
-                  <div className="ob-section-label">Tech Stack</div>
-                  <div>{result.tech_stack.map(t => <span key={t} className="ob-tag">{t}</span>)}</div>
-                </div>
-              )}
-
-              {result.key_modules?.length > 0 && (
-                <div className="ob-section">
-                  <div className="ob-section-label">Key Areas</div>
-                  <div>{result.key_modules.map(m => <span key={m} className="ob-tag">{m}</span>)}</div>
-                </div>
-              )}
-
-              {result.evolution && (
-                <div className="ob-section">
-                  <div className="ob-section-label">How it evolved</div>
-                  <div style={{ fontSize: 13, color: 'var(--text2)', lineHeight: 1.65 }}>{result.evolution}</div>
-                </div>
-              )}
-
-              {result.team_structure && (
-                <div className="ob-section">
-                  <div className="ob-section-label">Team</div>
-                  <div style={{ fontSize: 13, color: 'var(--text2)', lineHeight: 1.65 }}>{result.team_structure}</div>
-                </div>
-              )}
-
+              {result.project_type && <div className="ob-section"><div className="ob-section-label">What is this project?</div><div style={{ fontSize: 13, color: 'var(--text2)', lineHeight: 1.65 }}>{result.project_type}</div></div>}
+              {result.tech_stack?.length > 0 && <div className="ob-section"><div className="ob-section-label">Tech Stack</div><div>{result.tech_stack.map(t => <span key={t} className="ob-tag">{t}</span>)}</div></div>}
+              {result.key_modules?.length > 0 && <div className="ob-section"><div className="ob-section-label">Key Areas</div><div>{result.key_modules.map(m => <span key={m} className="ob-tag">{m}</span>)}</div></div>}
+              {result.evolution && <div className="ob-section"><div className="ob-section-label">How it evolved</div><div style={{ fontSize: 13, color: 'var(--text2)', lineHeight: 1.65 }}>{result.evolution}</div></div>}
+              {result.team_structure && <div className="ob-section"><div className="ob-section-label">Team</div><div style={{ fontSize: 13, color: 'var(--text2)', lineHeight: 1.65 }}>{result.team_structure}</div></div>}
               {result.recent_focus?.length > 0 && (
                 <div className="ob-section">
                   <div className="ob-section-label">Recent Focus</div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-                    {result.recent_focus.map((f, i) => (
-                      <div key={i} style={{ display: 'flex', gap: 8, fontSize: 12, color: 'var(--text2)', alignItems: 'flex-start' }}>
-                        <span style={{ color: 'var(--gold)', flexShrink: 0, marginTop: 2 }}>◆</span>{f}
-                      </div>
-                    ))}
+                    {result.recent_focus.map((f, i) => <div key={i} style={{ display: 'flex', gap: 8, fontSize: 12, color: 'var(--text2)', alignItems: 'flex-start' }}><span style={{ color: 'var(--gold)', flexShrink: 0, marginTop: 2 }}>◆</span>{f}</div>)}
                   </div>
                 </div>
               )}
-
               {result.onboarding_tips?.length > 0 && (
                 <div className="ob-section">
                   <div className="ob-section-label">Onboarding Tips</div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {result.onboarding_tips.map((t, i) => (
-                      <div key={i} style={{ display: 'flex', gap: 10, fontSize: 12, color: 'var(--text2)', padding: '10px 12px', background: 'var(--s2)', borderRadius: 8 }}>
-                        <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--teal)', flexShrink: 0, marginTop: 1 }}>{i + 1}.</span>{t}
-                      </div>
-                    ))}
+                    {result.onboarding_tips.map((t, i) => <div key={i} style={{ display: 'flex', gap: 10, fontSize: 12, color: 'var(--text2)', padding: '10px 12px', background: 'var(--s2)', borderRadius: 8 }}><span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--teal)', flexShrink: 0, marginTop: 1 }}>{i + 1}.</span>{t}</div>)}
                   </div>
                 </div>
               )}
-
               {result.health_snapshot && (
                 <div style={{ background: 'var(--s2)', border: '1px solid var(--border)', borderRadius: 8, padding: 14 }}>
                   <div className="ob-section-label" style={{ marginBottom: 8 }}>Codebase Health</div>
@@ -288,6 +469,7 @@ function OverviewModal({ onClose }) {
   )
 }
 
+// ── Main InsightsView ─────────────────────────────────────────────────────────
 export default function InsightsView() {
   const { API, commitDetailCache, currentRepo } = useStore()
   const toast = useToast()
@@ -331,7 +513,6 @@ export default function InsightsView() {
 
   const authors = useMemo(() => [...new Set((insCommits || []).map(c => c.commit.author.name))].sort(), [insCommits])
 
-  // KPIs
   const prevCutoff    = days ? new Date(Date.now() - 2 * days * 86400000) : null
   const prevCutoffEnd = days ? new Date(Date.now() - days * 86400000) : null
   const prevCs = days ? (insCommits || []).filter(c => {
@@ -346,7 +527,6 @@ export default function InsightsView() {
     : null
   const activeAuthors = new Set(filteredCommits.map(c => c.commit.author.name)).size
 
-  // Contrib table
   const contribData = useMemo(() => {
     const data = {}
     ;(insCommits || []).forEach(c => {
@@ -372,7 +552,6 @@ export default function InsightsView() {
     return rows
   }, [insCommits, author, days, contribSort, commitDetailCache.size])
 
-  // File heatmap from caches
   const fileHeatmap = useMemo(() => {
     const counts = {}
     commitDetailCache.forEach(d => { (d.files || []).forEach(f => { counts[f.filename] = (counts[f.filename] || 0) + 1 }) })
@@ -412,11 +591,7 @@ export default function InsightsView() {
             <option value="">All contributors</option>
             {authors.map(a => <option key={a} value={a}>{a}</option>)}
           </select>
-          <button
-            className="btn"
-            onClick={() => setShowOverview(true)}
-            style={{ fontSize: 12, color: 'var(--gold)', borderColor: 'rgba(201,168,76,.3)' }}
-          >
+          <button className="btn" onClick={() => setShowOverview(true)} style={{ fontSize: 12, color: 'var(--gold)', borderColor: 'rgba(201,168,76,.3)' }}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="13" height="13"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
             Project Overview
           </button>
@@ -445,35 +620,35 @@ export default function InsightsView() {
       <div className="insights-grid">
         <div className="ip full">
           <div className="ip-header">
-            <div><div className="ip-title">Commit Velocity</div><div className="ip-sub">Commits per week over selected period</div></div>
-            <span className="ip-badge" id="vel-badge">{Object.keys((() => { const w = {}; filteredCommits.forEach(c => { const d = new Date(c.commit.author.date); const sun = new Date(d); sun.setDate(d.getDate() - d.getDay()); w[sun.toISOString().slice(0,10)] = 1 }); return w })()).length} weeks</span>
+            <div><div className="ip-title">Commit Velocity</div><div className="ip-sub">Commits per {filteredCommits.length > 364 ? 'month' : 'week'} · hover for exact count</div></div>
+            <span className="ip-badge">{filteredCommits.length} commits</span>
           </div>
-          <div id="vel-chart" dangerouslySetInnerHTML={{ __html: renderVelocityChart(filteredCommits) }}></div>
+          <VelocityChart commits={filteredCommits} />
         </div>
 
         <div className="ip">
           <div className="ip-header"><div><div className="ip-title">Commit Type Breakdown</div><div className="ip-sub">Detected from message prefixes</div></div></div>
-          <div id="type-donut" dangerouslySetInnerHTML={{ __html: renderTypeDonut(filteredCommits) }}></div>
+          <div dangerouslySetInnerHTML={{ __html: renderTypeDonut(filteredCommits) }}></div>
         </div>
 
         <div className="ip">
           <div className="ip-header"><div><div className="ip-title">Hour of Day</div><div className="ip-sub">When does work happen?</div></div></div>
-          <div id="hod-chart" dangerouslySetInnerHTML={{ __html: renderHODChart(filteredCommits) }}></div>
+          <div dangerouslySetInnerHTML={{ __html: renderHODChart(filteredCommits) }}></div>
         </div>
 
         <div className="ip">
-          <div className="ip-header"><div><div className="ip-title">Day of Week</div><div className="ip-sub">Peak commit days</div></div></div>
-          <div id="dow-chart" dangerouslySetInnerHTML={{ __html: renderDOWChart(filteredCommits) }}></div>
+          <div className="ip-header"><div><div className="ip-title">Day of Week</div><div className="ip-sub">Peak commit days · hover for details</div></div></div>
+          <DOWChart commits={filteredCommits} />
         </div>
 
         <div className="ip">
           <div className="ip-header"><div><div className="ip-title">PR Funnel</div><div className="ip-sub">Open · Merged · Closed</div></div></div>
-          <div id="pr-funnel" dangerouslySetInnerHTML={{ __html: renderPRFunnel(filteredPRs) }}></div>
+          <div dangerouslySetInnerHTML={{ __html: renderPRFunnel(filteredPRs) }}></div>
         </div>
 
         <div className="ip">
-          <div className="ip-header"><div><div className="ip-title">Avg PR Merge Time</div><div className="ip-sub">Days from open to merge, by week</div></div></div>
-          <div id="pr-merge-trend" dangerouslySetInnerHTML={{ __html: renderPRMergeTrend(filteredPRs) }}></div>
+          <div className="ip-header"><div><div className="ip-title">Avg PR Merge Time</div><div className="ip-sub">Days from open to merge · hover for details</div></div></div>
+          <PRMergeTrendChart prs={filteredPRs} />
         </div>
 
         {/* Contributor table */}
@@ -527,7 +702,7 @@ export default function InsightsView() {
         {/* File heatmap */}
         <div className="ip full">
           <div className="ip-header"><div><div className="ip-title">File Change Heatmap</div><div className="ip-sub">Most frequently modified files — expand commits to populate</div></div></div>
-          <div id="file-heatmap-body" style={{ paddingTop: 8 }}>
+          <div style={{ paddingTop: 8 }}>
             {fileHeatmap.length === 0
               ? <div style={{ fontSize: 12, color: 'var(--text3)' }}>Expand commits or PRs to populate this chart</div>
               : (() => {
