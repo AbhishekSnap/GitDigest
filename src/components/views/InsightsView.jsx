@@ -46,72 +46,67 @@ function VelocityChart({ commits }) {
 
   const maxV = Math.max(1, ...vals)
   const midV = Math.round(maxV / 2)
-  const W = 600, H = 130, PL = 36, PR = 8, PT = 16, PB = 22
+  const W = 600, H = 150, PL = 32, PR = 6, PT = 14, PB = 42
   const plotW = W - PL - PR
   const plotH = H - PT - PB
   const n = keys.length
-  const BW = Math.max(4, Math.min(36, Math.floor(plotW / Math.max(n, 1) * 0.75)))
+  const BW = Math.max(3, Math.min(32, Math.floor(plotW / Math.max(n, 1) * 0.72)))
   const gap = n > 1 ? (plotW - BW * n) / (n - 1) : 0
   const bx = i => PL + i * (BW + gap)
-  const bh = v => Math.max(3, Math.round(v / maxV * plotH))
+  const bh = v => Math.max(2, Math.round(v / maxV * plotH))
   const by = v => PT + plotH - bh(v)
-  const labelStep = Math.ceil(n / 10)
+  const lx = i => bx(i) + BW / 2
+  const lblY = H - 4
 
   const tip = hovered !== null ? {
-    x: bx(hovered) + BW / 2,
-    y: by(vals[hovered]),
-    label: isMonthly ? keys[hovered] : 'week of ' + keys[hovered].slice(5),
+    x: lx(hovered), y: by(vals[hovered]),
+    label: isMonthly ? keys[hovered] : 'wk ' + keys[hovered].slice(5),
     val: vals[hovered],
   } : null
 
+  const ax = { fontSize: 7, fill: 'var(--text3)', fontFamily: 'var(--mono)' }
+
   return (
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', minWidth: 280, display: 'block', overflow: 'visible' }}>
-      {/* Gridlines */}
-      <line x1={PL} y1={PT} x2={W - PR} y2={PT} stroke="var(--border)" strokeWidth="0.5" strokeDasharray="3,3"/>
-      <line x1={PL} y1={PT + plotH / 2} x2={W - PR} y2={PT + plotH / 2} stroke="var(--border)" strokeWidth="0.5" strokeDasharray="3,3"/>
+      <line x1={PL} y1={PT} x2={W-PR} y2={PT} stroke="var(--border)" strokeWidth="0.4" strokeDasharray="4,4"/>
+      <line x1={PL} y1={PT+plotH/2} x2={W-PR} y2={PT+plotH/2} stroke="var(--border)" strokeWidth="0.4" strokeDasharray="4,4"/>
 
-      {/* Y labels */}
-      <text x={PL - 4} y={PT + 4} textAnchor="end" className="axis">{maxV}</text>
-      <text x={PL - 4} y={PT + plotH / 2 + 4} textAnchor="end" className="axis">{midV}</text>
-      <text x={PL - 4} y={PT + plotH + 4} textAnchor="end" className="axis">0</text>
+      <text x={PL-4} y={PT+4} textAnchor="end" style={ax}>{maxV}</text>
+      <text x={PL-4} y={PT+plotH/2+4} textAnchor="end" style={ax}>{midV}</text>
+      <text x={PL-4} y={PT+plotH+4} textAnchor="end" style={ax}>0</text>
 
       {vals.map((v, i) => {
-        const x = bx(i), h = bh(v), y = by(v)
+        const x = bx(i), h = bh(v), y = by(v), cx = lx(i)
         const isH = hovered === i
         return (
           <g key={i} style={{ cursor: 'default' }}
-            onMouseEnter={() => setHovered(i)}
-            onMouseLeave={() => setHovered(null)}
-          >
-            <rect x={x - 1} y={PT} width={BW + 2} height={plotH} fill="transparent"/>
-            <rect x={x} y={y} width={BW} height={h} rx="3"
-              fill="var(--gold)"
-              opacity={isH ? 1 : v === maxV ? 0.85 : 0.4}
-            />
-            {i % labelStep === 0 && (
-              <text x={x + BW / 2} y={H - 4} textAnchor="middle" className="axis">
-                {keys[i].slice(5)}
-              </text>
-            )}
+            onMouseEnter={() => setHovered(i)} onMouseLeave={() => setHovered(null)}>
+            <rect x={x-1} y={PT} width={BW+2} height={plotH} fill="transparent"/>
+            <rect x={x} y={y} width={BW} height={h} rx="2"
+              fill="var(--gold)" opacity={isH ? 1 : v === maxV ? 0.82 : 0.35}/>
+            <text x={cx} y={lblY} textAnchor="end"
+              transform={`rotate(-45,${cx},${lblY})`}
+              style={{ ...ax, fill: isH ? 'var(--gold)' : 'var(--text3)' }}>
+              {keys[i].slice(5)}
+            </text>
           </g>
         )
       })}
 
       {tip && (() => {
-        const TW = 110, TH = 34
-        const tx = Math.min(Math.max(tip.x - TW / 2, PL), W - TW - PR)
-        const ty = Math.max(tip.y - TH - 6, 2)
+        const TW = 100, TH = 30
+        const tx = Math.min(Math.max(tip.x - TW/2, PL), W-TW-PR)
+        const ty = Math.max(tip.y - TH - 8, 2)
         return (
           <g pointerEvents="none">
-            <rect x={tx} y={ty} width={TW} height={TH} rx={5}
+            <rect x={tx} y={ty} width={TW} height={TH} rx={4}
               fill="var(--s1)" stroke="var(--border2)" strokeWidth={1}
-              style={{ filter: 'drop-shadow(0 2px 8px rgba(0,0,0,.35))' }}/>
-            <text x={tx + TW / 2} y={ty + 14} textAnchor="middle"
-              style={{ fontSize: 12, fontWeight: 700, fill: 'var(--gold)' }}>
+              style={{ filter: 'drop-shadow(0 2px 8px rgba(0,0,0,.3))' }}/>
+            <text x={tx+TW/2} y={ty+12} textAnchor="middle"
+              style={{ fontSize: 11, fontWeight: 700, fill: 'var(--gold)' }}>
               {tip.val} commit{tip.val !== 1 ? 's' : ''}
             </text>
-            <text x={tx + TW / 2} y={ty + 27} textAnchor="middle"
-              style={{ fontSize: 9, fill: 'var(--text3)' }}>
+            <text x={tx+TW/2} y={ty+24} textAnchor="middle" style={{ fontSize: 7.5, fill: 'var(--text3)' }}>
               {tip.label}
             </text>
           </g>
@@ -134,27 +129,27 @@ function DOWChart({ commits }) {
   const max = Math.max(1, ...counts)
   const peakIdx = counts.indexOf(max)
 
-  const W = 320, H = 120, PL = 28, PR = 8, PT = 16, PB = 24
+  const W = 320, H = 110, PL = 26, PR = 6, PT = 12, PB = 18
   const plotW = W - PL - PR
   const plotH = H - PT - PB
-  const BW = Math.floor(plotW / 7 * 0.65)
+  const BW = Math.floor(plotW / 7 * 0.58)
   const gap = (plotW - BW * 7) / 6
   const bx = i => PL + i * (BW + gap)
-  const bh = v => Math.max(3, Math.round(v / max * plotH))
+  const bh = v => Math.max(2, Math.round(v / max * plotH))
   const by = v => PT + plotH - bh(v)
 
+  const ax = { fontSize: 7, fill: 'var(--text3)', fontFamily: 'var(--mono)' }
+
   const tip = hovered !== null ? {
-    x: bx(hovered) + BW / 2,
-    y: by(counts[hovered]),
-    day: dayNames[hovered],
-    val: counts[hovered],
+    x: bx(hovered) + BW / 2, y: by(counts[hovered]),
+    day: dayNames[hovered], val: counts[hovered],
     pct: total ? Math.round(counts[hovered] / total * 100) : 0,
   } : null
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', display: 'block', overflow: 'visible' }}>
-      <line x1={PL} y1={PT} x2={W - PR} y2={PT} stroke="var(--border)" strokeWidth="0.5" strokeDasharray="3,3"/>
-      <text x={PL - 4} y={PT + 4} textAnchor="end" className="axis">{max}</text>
+      <line x1={PL} y1={PT} x2={W-PR} y2={PT} stroke="var(--border)" strokeWidth="0.4" strokeDasharray="4,4"/>
+      <text x={PL-4} y={PT+4} textAnchor="end" style={ax}>{max}</text>
 
       {dayNames.map((d, i) => {
         const h = bh(counts[i]), y = by(counts[i])
@@ -162,21 +157,17 @@ function DOWChart({ commits }) {
         const isPeak = i === peakIdx
         return (
           <g key={d} style={{ cursor: 'default' }}
-            onMouseEnter={() => setHovered(i)}
-            onMouseLeave={() => setHovered(null)}
-          >
-            <rect x={bx(i) - 4} y={PT} width={BW + 8} height={plotH} fill="transparent"/>
-            <rect x={bx(i)} y={y} width={BW} height={h} rx="3"
-              fill="var(--gold)"
-              opacity={isH ? 1 : isPeak ? 0.85 : 0.38}
-            />
-            <text x={bx(i) + BW / 2} y={H - 6} textAnchor="middle" className="axis"
-              style={{ fill: isPeak && !isH ? 'var(--gold)' : undefined }}>
+            onMouseEnter={() => setHovered(i)} onMouseLeave={() => setHovered(null)}>
+            <rect x={bx(i)-4} y={PT} width={BW+8} height={plotH} fill="transparent"/>
+            <rect x={bx(i)} y={y} width={BW} height={h} rx="2"
+              fill="var(--gold)" opacity={isH ? 1 : isPeak ? 0.82 : 0.35}/>
+            <text x={bx(i)+BW/2} y={H-3} textAnchor="middle"
+              style={{ ...ax, fill: isPeak && !isH ? 'var(--gold)' : 'var(--text3)' }}>
               {d}
             </text>
             {hovered === null && counts[i] > 0 && (
-              <text x={bx(i) + BW / 2} y={y - 3} textAnchor="middle" className="axis"
-                style={{ fill: 'var(--text2)' }}>
+              <text x={bx(i)+BW/2} y={y-3} textAnchor="middle"
+                style={{ fontSize: 7, fill: 'var(--text2)', fontFamily: 'var(--mono)' }}>
                 {counts[i]}
               </text>
             )}
@@ -185,21 +176,20 @@ function DOWChart({ commits }) {
       })}
 
       {tip && (() => {
-        const TW = 108, TH = 34
-        const tx = Math.min(Math.max(tip.x - TW / 2, 0), W - TW)
+        const TW = 108, TH = 30
+        const tx = Math.min(Math.max(tip.x - TW/2, 0), W-TW)
         const ty = Math.max(tip.y - TH - 6, 2)
         return (
           <g pointerEvents="none">
-            <rect x={tx} y={ty} width={TW} height={TH} rx={5}
+            <rect x={tx} y={ty} width={TW} height={TH} rx={4}
               fill="var(--s1)" stroke="var(--border2)" strokeWidth={1}
-              style={{ filter: 'drop-shadow(0 2px 8px rgba(0,0,0,.35))' }}/>
-            <text x={tx + TW / 2} y={ty + 14} textAnchor="middle"
-              style={{ fontSize: 12, fontWeight: 700, fill: 'var(--gold)' }}>
-              {tip.day}: {tip.val} commits
+              style={{ filter: 'drop-shadow(0 2px 8px rgba(0,0,0,.3))' }}/>
+            <text x={tx+TW/2} y={ty+12} textAnchor="middle"
+              style={{ fontSize: 11, fontWeight: 700, fill: 'var(--gold)' }}>
+              {tip.day}: {tip.val}
             </text>
-            <text x={tx + TW / 2} y={ty + 27} textAnchor="middle"
-              style={{ fontSize: 9, fill: 'var(--text3)' }}>
-              {tip.pct}% of total activity
+            <text x={tx+TW/2} y={ty+24} textAnchor="middle" style={{ fontSize: 7.5, fill: 'var(--text3)' }}>
+              {tip.pct}% of all commits
             </text>
           </g>
         )
@@ -228,88 +218,82 @@ function PRMergeTrendChart({ prs }) {
   const counts = keys.map(k => weeks[k].n)
 
   const maxV = Math.max(1, ...vals)
-  const W = 320, H = 120, PL = 34, PR = 8, PT = 16, PB = 24
+  const W = 600, H = 150, PL = 32, PR = 6, PT = 14, PB = 42
   const plotW = W - PL - PR
   const plotH = H - PT - PB
   const n = keys.length
+  const lblY = H - 4
 
   const px = i => PL + (i / Math.max(n - 1, 1)) * plotW
   const py = v => PT + plotH - (v / maxV) * plotH
-
   const pts = vals.map((v, i) => [px(i), py(v)])
   const polyPts = pts.map(p => p.join(',')).join(' ')
   const areaD = n > 1
-    ? `M${pts[0][0]},${PT + plotH} ${pts.map(p => `L${p[0]},${p[1]}`).join(' ')} L${pts[n-1][0]},${PT + plotH} Z`
+    ? `M${pts[0][0]},${PT+plotH} ${pts.map(p => `L${p[0]},${p[1]}`).join(' ')} L${pts[n-1][0]},${PT+plotH} Z`
     : ''
 
-  const labelStep = Math.ceil(n / 6)
+  const ax = { fontSize: 7, fill: 'var(--text3)', fontFamily: 'var(--mono)' }
 
   const tip = hovered !== null ? {
-    x: pts[hovered][0],
-    y: pts[hovered][1],
+    x: pts[hovered][0], y: pts[hovered][1],
     label: 'wk ' + keys[hovered].slice(5),
-    val: vals[hovered],
-    n: counts[hovered],
+    val: vals[hovered], n: counts[hovered],
   } : null
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', display: 'block', overflow: 'visible' }}>
       <defs>
         <linearGradient id="prmt-grad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="var(--teal)" stopOpacity="0.22"/>
+          <stop offset="0%" stopColor="var(--teal)" stopOpacity="0.12"/>
           <stop offset="100%" stopColor="var(--teal)" stopOpacity="0"/>
         </linearGradient>
       </defs>
 
-      {/* Gridlines */}
-      <line x1={PL} y1={PT} x2={W - PR} y2={PT} stroke="var(--border)" strokeWidth="0.5" strokeDasharray="3,3"/>
-      <line x1={PL} y1={PT + plotH / 2} x2={W - PR} y2={PT + plotH / 2} stroke="var(--border)" strokeWidth="0.5" strokeDasharray="3,3"/>
+      <line x1={PL} y1={PT} x2={W-PR} y2={PT} stroke="var(--border)" strokeWidth="0.4" strokeDasharray="4,4"/>
+      <line x1={PL} y1={PT+plotH/2} x2={W-PR} y2={PT+plotH/2} stroke="var(--border)" strokeWidth="0.4" strokeDasharray="4,4"/>
 
-      {/* Y labels */}
-      <text x={PL - 4} y={PT + 4} textAnchor="end" className="axis">{maxV}d</text>
-      <text x={PL - 4} y={PT + plotH / 2 + 4} textAnchor="end" className="axis">{(maxV / 2).toFixed(1)}d</text>
-      <text x={PL - 4} y={PT + plotH + 4} textAnchor="end" className="axis">0d</text>
+      <text x={PL-4} y={PT+4} textAnchor="end" style={ax}>{maxV}d</text>
+      <text x={PL-4} y={PT+plotH/2+4} textAnchor="end" style={ax}>{(maxV/2).toFixed(1)}d</text>
+      <text x={PL-4} y={PT+plotH+4} textAnchor="end" style={ax}>0d</text>
 
       {areaD && <path d={areaD} fill="url(#prmt-grad)"/>}
-      <polyline points={polyPts} fill="none" stroke="var(--teal)" strokeWidth="2" strokeLinejoin="round"/>
+      <polyline points={polyPts} fill="none" stroke="var(--teal)" strokeWidth="1.5"
+        strokeLinejoin="round" strokeLinecap="round"/>
 
-      {vals.map((v, i) => (
-        <g key={i} style={{ cursor: 'default' }}
-          onMouseEnter={() => setHovered(i)}
-          onMouseLeave={() => setHovered(null)}
-        >
-          <circle cx={pts[i][0]} cy={pts[i][1]} r={10} fill="transparent"/>
-          <circle cx={pts[i][0]} cy={pts[i][1]}
-            r={hovered === i ? 5 : 3}
-            fill={hovered === i ? 'var(--teal)' : 'var(--s1)'}
-            stroke="var(--teal)"
-            strokeWidth={hovered === i ? 0 : 2}
-          />
-          {i % labelStep === 0 && (
-            <text x={pts[i][0]} y={H - 6}
-              textAnchor={i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'}
-              className="axis">
+      {vals.map((v, i) => {
+        const cx = pts[i][0]
+        const isH = hovered === i
+        return (
+          <g key={i} style={{ cursor: 'default' }}
+            onMouseEnter={() => setHovered(i)} onMouseLeave={() => setHovered(null)}>
+            <circle cx={cx} cy={pts[i][1]} r={9} fill="transparent"/>
+            <circle cx={cx} cy={pts[i][1]}
+              r={isH ? 4 : 2}
+              fill={isH ? 'var(--teal)' : 'var(--s1)'}
+              stroke="var(--teal)" strokeWidth={isH ? 0 : 1.5}/>
+            <text x={cx} y={lblY} textAnchor="end"
+              transform={`rotate(-45,${cx},${lblY})`}
+              style={{ ...ax, fill: isH ? 'var(--teal)' : 'var(--text3)' }}>
               {keys[i].slice(5)}
             </text>
-          )}
-        </g>
-      ))}
+          </g>
+        )
+      })}
 
       {tip && (() => {
-        const TW = 110, TH = 34
-        const tx = Math.min(Math.max(tip.x - TW / 2, 0), W - TW)
-        const ty = Math.max(tip.y - TH - 8, 2)
+        const TW = 100, TH = 30
+        const tx = Math.min(Math.max(tip.x - TW/2, PL), W-TW-PR)
+        const ty = Math.max(tip.y - TH - 10, 2)
         return (
           <g pointerEvents="none">
-            <rect x={tx} y={ty} width={TW} height={TH} rx={5}
+            <rect x={tx} y={ty} width={TW} height={TH} rx={4}
               fill="var(--s1)" stroke="var(--border2)" strokeWidth={1}
-              style={{ filter: 'drop-shadow(0 2px 8px rgba(0,0,0,.35))' }}/>
-            <text x={tx + TW / 2} y={ty + 14} textAnchor="middle"
-              style={{ fontSize: 12, fontWeight: 700, fill: 'var(--teal)' }}>
+              style={{ filter: 'drop-shadow(0 2px 8px rgba(0,0,0,.3))' }}/>
+            <text x={tx+TW/2} y={ty+12} textAnchor="middle"
+              style={{ fontSize: 11, fontWeight: 700, fill: 'var(--teal)' }}>
               {tip.val}d avg
             </text>
-            <text x={tx + TW / 2} y={ty + 27} textAnchor="middle"
-              style={{ fontSize: 9, fill: 'var(--text3)' }}>
+            <text x={tx+TW/2} y={ty+24} textAnchor="middle" style={{ fontSize: 7.5, fill: 'var(--text3)' }}>
               {tip.label} · {tip.n} PR{tip.n !== 1 ? 's' : ''}
             </text>
           </g>
@@ -646,8 +630,8 @@ export default function InsightsView() {
           <div dangerouslySetInnerHTML={{ __html: renderPRFunnel(filteredPRs) }}></div>
         </div>
 
-        <div className="ip">
-          <div className="ip-header"><div><div className="ip-title">Avg PR Merge Time</div><div className="ip-sub">Days from open to merge · hover for details</div></div></div>
+        <div className="ip full">
+          <div className="ip-header"><div><div className="ip-title">Avg PR Merge Time</div><div className="ip-sub">Days from open to merge, by week · hover for details</div></div></div>
           <PRMergeTrendChart prs={filteredPRs} />
         </div>
 
