@@ -4,6 +4,65 @@ import useStore from '../../store/useStore.js'
 import { useToast } from '../../context/ToastContext.jsx'
 import { submitAskQuery } from '../../api/anthropic.js'
 
+function renderMarkdown(raw) {
+  if (!raw) return ''
+
+  function inline(s) {
+    return s
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.+?)\*/g, '<em>$1</em>')
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+  }
+
+  const lines = raw.split('\n')
+  const out = []
+  let i = 0
+
+  while (i < lines.length) {
+    const line = lines[i]
+
+    if (line.startsWith('### ')) { out.push(`<h4 class="ask-h4">${inline(line.slice(4))}</h4>`); i++; continue }
+    if (line.startsWith('## '))  { out.push(`<h3 class="ask-h3">${inline(line.slice(3))}</h3>`); i++; continue }
+    if (line.startsWith('# '))   { out.push(`<h2 class="ask-h2">${inline(line.slice(2))}</h2>`); i++; continue }
+
+    if (line.startsWith('> ')) {
+      out.push(`<blockquote class="ask-bq">${inline(line.slice(2))}</blockquote>`)
+      i++; continue
+    }
+
+    if (line.startsWith('|')) {
+      const rows = []
+      while (i < lines.length && lines[i].startsWith('|')) { rows.push(lines[i]); i++ }
+      const [header, , ...body] = rows
+      const ths = header.split('|').slice(1, -1).map(h => `<th>${inline(h.trim())}</th>`).join('')
+      const trs = body.map(r =>
+        `<tr>${r.split('|').slice(1, -1).map(d => `<td>${inline(d.trim())}</td>`).join('')}</tr>`
+      ).join('')
+      out.push(`<table class="ask-table"><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table>`)
+      continue
+    }
+
+    if (line.match(/^[-*] /)) {
+      const items = []
+      while (i < lines.length && lines[i].match(/^[-*] /)) {
+        items.push(`<li>${inline(lines[i].slice(2))}</li>`); i++
+      }
+      out.push(`<ul class="ask-ul">${items.join('')}</ul>`)
+      continue
+    }
+
+    if (line.match(/^---+$/)) { out.push('<hr class="ask-hr">'); i++; continue }
+    if (line.trim() === '') { i++; continue }
+
+    out.push(`<p>${inline(line)}</p>`)
+    i++
+  }
+
+  return out.join('')
+}
+
 const SUGGESTIONS = [
   'What are the most common types of changes in this repo?',
   'Who is the most active contributor?',
@@ -100,7 +159,7 @@ export default function AskOverlay({ onClose }) {
         {/* Answer */}
         {answer && (
           <div className="ask-result">
-            <div className="ask-card">{answer}</div>
+            <div className="ask-card" dangerouslySetInnerHTML={{ __html: renderMarkdown(answer) }} />
           </div>
         )}
       </div>
