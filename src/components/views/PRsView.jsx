@@ -240,17 +240,20 @@ function ExpandedPR({ pr: p, analysis, files, reviews, comments, reviewComments,
 
   const num = p.number
 
-  if (!analysis && !files.length) {
+  if (!analysis) {
     return (
       <div className="pr-body">
-        <div className="ag">
-          <div className="skeleton" style={{ height: 90 }}></div>
-          <div className="skeleton" style={{ height: 90 }}></div>
-        </div>
+        {files.length === 0 ? (
+          <div className="ag">
+            <div className="skeleton" style={{ height: 90 }}></div>
+            <div className="skeleton" style={{ height: 90 }}></div>
+          </div>
+        ) : (
+          <ThinkingDots messages={['Reading PR files…', 'Analysing with Claude…', 'Reviewing sentiment…', 'Generating insights…']} />
+        )}
       </div>
     )
   }
-  if (!analysis) return null
 
   const sentiment = analysis.review_sentiment || ''
   let revCls = 'rev-none'
